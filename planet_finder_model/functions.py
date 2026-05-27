@@ -142,22 +142,41 @@ def fit_cycle(t_full, y_full, series_index, b0=0, P0=4000, phi0=0, print_results
         print(f"phi  = {phi}")
 
     if plot == True:
-        plt.figure(figsize=(12,6))
 
-        plt.plot(x, y_rv, '.', alpha=0.4, markersize=2, label='RV')
-        plt.plot(x, rv_fit, linewidth=3, label='RV fit')
-        plt.legend()
-        # plt.show()
-        plt.savefig(f'rv_{output_name}.png')
+        fig, axs = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
+
+# RV panel
+        axs[0].plot(x, y_rv, '.', alpha=0.4, markersize=2, label='RV')
+        axs[0].plot(x, rv_fit, linewidth=3, label='RV fit')
+        axs[0].set_ylabel("RV")
+        axs[0].legend()
+
+# RHK panel
+        axs[1].plot(x, y_rhk, '.', alpha=0.4, markersize=2, label='RHK')
+        axs[1].plot(x, rhk_fit, linewidth=3, label='RHK fit')
+        axs[1].set_ylabel("RHK")
+        axs[1].set_xlabel("Time")
+        axs[1].legend()
+
+        plt.tight_layout()
+        plt.savefig(output_name)
+
+        # plt.figure(figsize=(12,6))
+
+        # plt.plot(x, y_rv, '.', alpha=0.4, markersize=2, label='RV')
+        # plt.plot(x, rv_fit, linewidth=3, label='RV fit')
+        # plt.legend()
+        # # plt.show()
+        # plt.savefig(f'rv_{output_name}')
 
 
-        plt.figure(figsize=(12,6))
-        plt.plot(x, y_rhk, '.', alpha=0.4, markersize=2, label='RHK')
-        plt.plot(x, rhk_fit, linewidth=3, label='RHK fit')
+        # plt.figure(figsize=(12,6))
+        # plt.plot(x, y_rhk, '.', alpha=0.4, markersize=2, label='RHK')
+        # plt.plot(x, rhk_fit, linewidth=3, label='RHK fit')
 
-        plt.legend()
-        # plt.show()
-        plt.savefig(f'rhk_{output_name}.png')
+        # plt.legend()
+        # # plt.show()
+        # plt.savefig(f'rhk_{output_name}')
 
     return rv_fit, rhk_fit
 
@@ -225,7 +244,7 @@ def optimise_params(t_full, y_full, series_index, C, bounds_list, delta_0 = -0.0
     if change_C == True:
         C.set_param(xbest[:len(params)], params)
 
-    return xbest
+    return xbest, C
 
 
 def log_prior(theta, bounds_list, planet = True):
@@ -306,7 +325,10 @@ def plot_fit(t_full, y_full, yerr_full, series_index, C, xbest, rv_std = 1.0, ou
             color='g',
             alpha=0.5)
         ax.plot(tsmooth, mu, 'g', label='predict.')
-        ax.set_ylabel(f'$y_{k}$')
+        if k == 0:
+            ax.set_ylabel("RV")
+        if k == 1:
+            ax.set_ylabel('RHK')   
 
         if return_residuals==True:
             if k == 0:
@@ -362,6 +384,24 @@ def plot_corner(sampler, C, discard = 1000, planet = True, output_name = 'corner
         flat_samples, labels=labels, show_titles=True
     );
     plt.savefig(output_name)
+
+
+def get_MAP_params(sampler, burn=1500, thin=1):
+
+    flat_samples = sampler.get_chain(discard=burn, thin=thin, flat=True)   # shape (n_samples, ndim)
+    flat_logp    = sampler.get_log_prob(discard=burn, thin=thin, flat=True) # shape (n_samples,)
+
+    finite_mask = np.isfinite(flat_logp)
+    flat_samples = flat_samples[finite_mask]
+    flat_logp    = flat_logp[finite_mask]
+
+    map_idx = np.argmax(flat_logp)
+    map_sample = flat_samples[map_idx]
+    map_logp = flat_logp[map_idx]
+
+    print("MAP log-posterior:", map_logp)
+    print("MAP sample (theta):", map_sample)
+    return map_sample, map_logp
 
 # def alpha(t, pcyc, phi, k):
 

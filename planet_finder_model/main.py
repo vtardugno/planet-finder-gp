@@ -54,12 +54,12 @@ def build_parser():
     parser.add_argument("--alpha0-max-frac", type=float, default=10.0)
     parser.add_argument("--alpha1-max-frac", type=float, default=5.0)
     parser.add_argument("--beta0-max-frac", type=float, default=10.0)
-    parser.add_argument("--planet-p-min", type=float, default=30.0)
-    parser.add_argument("--planet-p-max", type=float, default=50.0)
-    parser.add_argument("--planet-a-min", type=float, default=0.0001)
-    parser.add_argument("--planet-a-max", type=float, default=0.01)
-    parser.add_argument("--planet-b-min", type=float, default=0.0001)
-    parser.add_argument("--planet-b-max", type=float, default=0.01)
+    parser.add_argument("--planet-p-min", type=float, default=None)
+    parser.add_argument("--planet-p-max", type=float, default=None)
+    parser.add_argument("--planet-a-min", type=float, default=0.00001)
+    parser.add_argument("--planet-a-max", type=float, default=0.1)
+    parser.add_argument("--planet-b-min", type=float, default=0.00001)
+    parser.add_argument("--planet-b-max", type=float, default=0.1)
     parser.add_argument("--delta0-min", type=float, default=-0.5)
     parser.add_argument("--delta0-max", type=float, default=0.5)
     parser.add_argument("--delta1-min", type=float, default=-2.0)
@@ -78,8 +78,10 @@ def build_parser():
     # parser.add_argument("--fit-output", default="fit_plot.png", help="Output name for the fit plot")
     # parser.add_argument("--chains-output", default="chains_plot.png", help="Output name for the chains plot")
     # parser.add_argument("--corner-output", default="corner_plot.png", help="Output name for the corner plot")
-    parser.add_argument("--output-name", default="0", help="Base output name for plots")
+    parser.add_argument("--output-name", default=None, help="Base output name for plots")
     parser.add_argument("--corner-discard", type=int, default=1000, help="Discard this many samples before corner plotting")
+    parser.add_argument("--map_thin", type=int, default=1, help="Thin the MCMC chain by this factor when calculating MAP parameters")
+    parser.add_argument("--map_burn", type=int, default=1000, help="Discard this many samples before calculating MAP parameters")
 
     return parser
 
@@ -111,6 +113,15 @@ def main():
    
     args = build_parser().parse_args()
 
+    if args.output_name is None:
+        args.output_name = f"p{args.planet_period}_a{args.planet_a}_b{args.planet_b}"
+
+    if args.planet_p_min is None:
+        args.planet_p_min = args.planet_p - 10
+
+    if args.planet_p_max is None:
+        args.planet_p_max = args.planet_p + 10
+
     load_result = mf.load_and_norm_data(
                         args.path,
                         args.star_name,
@@ -126,7 +137,7 @@ def main():
         rv_std = 1.0
 
 
-    cycle_out_name = "cycle_fit_" + args.output_name + ".png"
+    cycle_out_name = "results/cycle_fit_" + args.output_name + ".png"
     rv_fit, rhk_fit = mf.fit_cycle(t_full, y_full, series_index, b0=args.cycle_b0, P0=args.cycle_P0, phi0=args.cycle_phi0, plot=args.cycle_plot, print_results=args.cycle_print_results, output_name=cycle_out_name)
 
     y_full[series_index[0]] = y_full[series_index[0]] - rv_fit
@@ -147,7 +158,7 @@ def main():
 
     bounds_list = build_bounds_list(args, stds)
     
-    xbest = mf.optimise_params(t_full, y_full, series_index, C, bounds_list, 
+    xbest, C = mf.optimise_params(t_full, y_full, series_index, C, bounds_list, 
                                 delta_0=args.delta_0,
                                 delta_1=args.delta_1,
                                 planet_p=args.planet_p,
@@ -156,14 +167,26 @@ def main():
                                 fit_planet=args.fit_planet,
                                 change_C=args.change_C)
 
-    fit_plot_name = "fit_plot_" + args.output_name + ".png"
-    mf.plot_fit(t_full, y_full, yerr_full, series_index, C, xbest, rv_std=rv_std,output_name=fit_plot_name,inject_planet=args.fit_planet)
+    fit_plot_name_optim = "results/optim_fit_plot_" + args.output_name + ".png"
+    mf.plot_fit(t_full, y_full, yerr_full, series_index, C, xbest, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
+
     sampler = mf.run_emcee(t_full, y_full, series_index, C, xbest, bounds_list, run_length=args.run_length, planet=args.fit_planet)
-    chains_plot_name = "chains_plot_" + args.output_name + ".png"
+    np.save("results/sampler_" + args.output_name + ".npy", sampler.get_chain())
+
+    chains_plot_name = "results/chains_plot_" + args.output_name + ".png"
     mf.plot_chains(sampler, C, planet=args.fit_planet, output_name=chains_plot_name)
-    corner_plot_name = "corner_plot_" + args.output_name + ".png"
+
+    corner_plot_name = "results/corner_plot_" + args.output_name + ".png"
     mf.plot_corner(sampler, C, discard=args.corner_discard,planet=args.fit_planet,output_name=corner_plot_name)
 
+    map_params, _ = mf.get_MAP_params(sampler, args.map_burn, args.map_thin)
+    np.save("results/map_params_" + args.output_name + ".npy", map_params)
+
+    params, _ = mf.get_opt_params(C)
+    C.set_param(map_params[:len(params)], params)
+
+    fit_plot_name_map = "results/MAP_fit_plot_" + args.output_name + ".png"
+    mf.plot_fit(t_full, y_full, yerr_full, series_index, C, xbest, rv_std=rv_std,output_name=fit_plot_name_map,inject_planet=args.fit_planet)
 
 if __name__ == "__main__":
     main()
