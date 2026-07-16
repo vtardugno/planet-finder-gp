@@ -23,10 +23,11 @@ def build_parser():
     parser.add_argument("--normalise", action=argparse.BooleanOptionalAction, default=False, help="Normalise RV and RHK")
     parser.add_argument("--inject-planet", action=argparse.BooleanOptionalAction, default=True, help="Inject a synthetic planet signal into RV")
     parser.add_argument("--planet-period", type=float, default=40.0, help="Injected planet period")
-    parser.add_argument("--planet-a", type=float, default=0.001, help="Injected planet sine amplitude")
-    parser.add_argument("--planet-b", type=float, default=0.001, help="Injected planet cosine amplitude")
+    parser.add_argument("--planet-A", type=float, default=0.001, help="Injected planet semi-amplitude")
+    parser.add_argument("--planet-B", type=float, default=0.001, help="Injected planet phase")
 
     # Cycle fit
+    parser.add_argument("--fit-cycle", action=argparse.BooleanOptionalAction, default=True, help="Subtract cycle before fitting the GP model")
     parser.add_argument("--cycle-b0", type=float, default=0.0, help="Initial shared linear coefficient")
     parser.add_argument("--cycle-P0", type=float, default=4000.0, help="Initial cycle period")
     parser.add_argument("--cycle-phi0", type=float, default=0.0, help="Initial cycle phase")
@@ -56,24 +57,25 @@ def build_parser():
     parser.add_argument("--beta0-max-frac", type=float, default=10.0)
     parser.add_argument("--planet-p-min", type=float, default=None)
     parser.add_argument("--planet-p-max", type=float, default=None)
-    parser.add_argument("--planet-a-min", type=float, default=0.00001)
-    parser.add_argument("--planet-a-max", type=float, default=0.1)
-    parser.add_argument("--planet-b-min", type=float, default=0.00001)
-    parser.add_argument("--planet-b-max", type=float, default=0.1)
+    parser.add_argument("--planet-A-min", type=float, default=0.000001)
+    parser.add_argument("--planet-A-max", type=float, default=0.1)
+    parser.add_argument("--planet-B-min", type=float, default=0.000001)
+    parser.add_argument("--planet-B-max", type=float, default=0.1)
     parser.add_argument("--delta0-min", type=float, default=-0.5)
     parser.add_argument("--delta0-max", type=float, default=0.5)
     parser.add_argument("--delta1-min", type=float, default=-2.0)
     parser.add_argument("--delta1-max", type=float, default=2.0)
 
     # Optimisation / MCMC
+    parser.add_argument("--run-mcmc", action=argparse.BooleanOptionalAction, default=False, help="Run MCMC after optimisation")
     parser.add_argument("--delta-0", type=float, default=-0.001, help="Initial delta_0")
     parser.add_argument("--delta-1", type=float, default=0.001, help="Initial delta_1")
-    parser.add_argument("--planet-p", type=float, default=40.05, help="Initial planet period")
-    parser.add_argument("--planet-a-fit", type=float, default=0.0005, help="Initial planet A")
-    parser.add_argument("--planet-b-fit", type=float, default=0.0005, help="Initial planet B")
+    parser.add_argument("--planet-p", type=float, default=None, help="Initial planet period")
+    parser.add_argument("--planet-A-fit", type=float, default=0.01, help="Initial planet A")
+    parser.add_argument("--planet-B-fit", type=float, default=0.01, help="Initial planet B")
     parser.add_argument("--fit-planet", action=argparse.BooleanOptionalAction, default=True, help="Include planet parameters in the optimisation")
     parser.add_argument("--change-C", action=argparse.BooleanOptionalAction, default=True, help="Write the optimised kernel parameters back into C")
-    parser.add_argument("--run-length", type=int, default=2000, help="Number of MCMC steps")
+    parser.add_argument("--run-length", type=int, default=3000, help="Number of MCMC steps")
     # Outputs
     # parser.add_argument("--fit-output", default="fit_plot.png", help="Output name for the fit plot")
     # parser.add_argument("--chains-output", default="chains_plot.png", help="Output name for the chains plot")
@@ -92,42 +94,50 @@ def build_bounds_list(args, stds):
     alpha_1_max = args.alpha1_max_frac * stds[1]
     beta_0_max = args.beta0_max_frac * stds[0]
 
-    return [
-        (0.0, rvjit_max),
-        (0.0, rhkjit_max),
-        (args.prot_min, args.prot_max),
-        (args.rho_min, args.rho_max),
-        (args.eta_min, args.eta_max),
-        (0.0, alpha_0_max),
-        (-alpha_1_max, alpha_1_max),
-        (-beta_0_max, beta_0_max),
-        (args.delta0_min, args.delta0_max),
-        (args.delta1_min, args.delta1_max),
-        (args.planet_p_min, args.planet_p_max),
-        (args.planet_a_min, args.planet_a_max),
-        (args.planet_b_min, args.planet_b_max),
-    ]
+    if args.fit_planet:
 
+        return [
+            (0.0, rvjit_max),
+            (0.0, rhkjit_max),
+            (args.prot_min, args.prot_max),
+            (args.rho_min, args.rho_max),
+            (args.eta_min, args.eta_max),
+            (0.0, alpha_0_max),
+            (-alpha_1_max, alpha_1_max),
+            (-beta_0_max, beta_0_max),
+            (args.delta0_min, args.delta0_max),
+            (args.delta1_min, args.delta1_max),
+            (args.planet_p_min, args.planet_p_max),
+            (args.planet_A_min, args.planet_A_max),
+            (args.planet_B_min, args.planet_B_max),
+        ]
+    else:
+        return [
+            (0.0, rvjit_max),
+            (0.0, rhkjit_max),
+            (args.prot_min, args.prot_max),
+            (args.rho_min, args.rho_max),
+            (args.eta_min, args.eta_max),
+            (0.0, alpha_0_max),
+            (-alpha_1_max, alpha_1_max),
+            (-beta_0_max, beta_0_max),
+            (args.delta0_min, args.delta0_max),
+            (args.delta1_min, args.delta1_max),
+        ]
 
 def main():
    
     args = build_parser().parse_args()
 
     if args.output_name is None:
-        args.output_name = f"p{args.planet_period}_a{args.planet_a}_b{args.planet_b}"
-
-    if args.planet_p_min is None:
-        args.planet_p_min = args.planet_p - 10
-
-    if args.planet_p_max is None:
-        args.planet_p_max = args.planet_p + 10
+        args.output_name = f"p{args.planet_period}_A{args.planet_A}_B{args.planet_B}"
 
     load_result = mf.load_and_norm_data(
                         args.path,
                         args.star_name,
                         normalise=args.normalise,
                         inject_planet=args.inject_planet,
-                        planet_params=(args.planet_period, args.planet_a, args.planet_b),
+                        planet_params=(args.planet_period, args.planet_A, args.planet_B),
                     )
 
     if args.inject_planet and args.normalise:
@@ -136,57 +146,149 @@ def main():
         t_full, y_full, yerr_full, series_index = load_result
         rv_std = 1.0
 
+    if args.fit_cycle:
+        cycle_out_name = "results_nocyc/cycle_fit_" + args.output_name + ".png"
+        rv_fit, rhk_fit = mf.fit_cycle(t_full, y_full, series_index, b0=args.cycle_b0, P0=args.cycle_P0, phi0=args.cycle_phi0, plot=args.cycle_plot, print_results=args.cycle_print_results, output_name=cycle_out_name)
 
-    cycle_out_name = "results/cycle_fit_" + args.output_name + ".png"
-    rv_fit, rhk_fit = mf.fit_cycle(t_full, y_full, series_index, b0=args.cycle_b0, P0=args.cycle_P0, phi0=args.cycle_phi0, plot=args.cycle_plot, print_results=args.cycle_print_results, output_name=cycle_out_name)
+        y_full[series_index[0]] = y_full[series_index[0]] - rv_fit
+        y_full[series_index[1]] = y_full[series_index[1]] - rhk_fit
 
-    y_full[series_index[0]] = y_full[series_index[0]] - rv_fit
-    y_full[series_index[1]] = y_full[series_index[1]] - rhk_fit
+    # if args.planet_p is None:
+    #     periodogram_out_name = "results/periodogram_" + args.output_name + ".png"
+    #     planet_guess, _ = mf.period_guess(t_full, y_full, yerr_full, series_index, PMIN = 1.1, PMAX = 310.0, MAX_FAP = 1e-5, MAX_NPL = 2, plot = True, output_name = periodogram_out_name)
+    #     args.planet_p = planet_guess[0]
+
+    # if args.planet_p_min is None:
+    #     args.planet_p_min = np.max([args.planet_p - 10, 2.0])
+
+    # if args.planet_p_max is None:
+    #     args.planet_p_max = np.min([args.planet_p + 10, 310.0])
+
 
     stds = [np.std(y_full[series_index[0]]), np.std(y_full[series_index[1]])]
 
-    C = cov.Cov(
-    t_full,
-    err=term.Error(yerr_full),
-    rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
-    rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
-    rot = MultiSeriesKernel(term.MEPKernel(args.sig,args.prot,args.rho,args.eta), series_index, 
-            np.array([stds[0], stds[1]]), 
-            np.array([stds[0], 0.0])
-        ),
-    )
-
     bounds_list = build_bounds_list(args, stds)
-    
-    xbest, C = mf.optimise_params(t_full, y_full, series_index, C, bounds_list, 
-                                delta_0=args.delta_0,
-                                delta_1=args.delta_1,
-                                planet_p=args.planet_p,
-                                planet_a=args.planet_a_fit,
-                                planet_b=args.planet_b_fit,
-                                fit_planet=args.fit_planet,
-                                change_C=args.change_C)
 
-    fit_plot_name_optim = "results/optim_fit_plot_" + args.output_name + ".png"
-    mf.plot_fit(t_full, y_full, yerr_full, series_index, C, xbest, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
+    if args.fit_planet:
+        A_inits = [args.planet_A_fit, args.planet_A_fit/10, args.planet_A_fit/100, args.planet_A_fit/1000]
+        B_inits = [args.planet_B_fit, args.planet_B_fit/10, args.planet_B_fit/100, args.planet_B_fit/1000]
+        best_loglike = -np.inf
+        xbest_all = []
+        best_p_init = 0
+        
+        if args.planet_p is None:
+            periodogram_out_name = "results_nocyc/periodogram_" + args.output_name + ".png"
+            planet_guess, _ = mf.period_guess(t_full, y_full, yerr_full, series_index, PMIN = 1.1, PMAX = 400.0, MAX_FAP = 1e-5, MAX_NPL = 2, plot = True, output_name = periodogram_out_name)
+        else:
+            planet_guess = [args.planet_p]
 
-    sampler = mf.run_emcee(t_full, y_full, series_index, C, xbest, bounds_list, run_length=args.run_length, planet=args.fit_planet)
-    np.save("results/sampler_" + args.output_name + ".npy", sampler.get_chain())
+        for p in planet_guess:
 
-    chains_plot_name = "results/chains_plot_" + args.output_name + ".png"
-    mf.plot_chains(sampler, C, planet=args.fit_planet, output_name=chains_plot_name)
+            if args.planet_p_min is None:
+                args.planet_p_min = np.max([p - 10, 1.1])
+            if args.planet_p_max is None:
+                args.planet_p_max = np.min([p + 10, 400.0])
 
-    corner_plot_name = "results/corner_plot_" + args.output_name + ".png"
-    mf.plot_corner(sampler, C, discard=args.corner_discard,planet=args.fit_planet,output_name=corner_plot_name)
+            bounds_list[-3] = (np.max([p - 10, 1.1]), np.min([p + 10, 400.0]))
 
-    map_params, _ = mf.get_MAP_params(sampler, args.map_burn, args.map_thin)
-    np.save("results/map_params_" + args.output_name + ".npy", map_params)
+            for A in A_inits:
+                for B in B_inits:
 
-    params, _ = mf.get_opt_params(C)
-    C.set_param(map_params[:len(params)], params)
+                    C = cov.Cov(
+                    t_full,
+                    err=term.Error(yerr_full),
+                    rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
+                    rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
+                    rot = MultiSeriesKernel(term.MEPKernel(args.sig,args.prot,args.rho,args.eta), series_index, 
+                            np.array([stds[0], stds[1]]), 
+                            np.array([stds[0], 0.0])
+                        ),
+                    )
 
-    fit_plot_name_map = "results/MAP_fit_plot_" + args.output_name + ".png"
-    mf.plot_fit(t_full, y_full, yerr_full, series_index, C, xbest, rv_std=rv_std,output_name=fit_plot_name_map,inject_planet=args.fit_planet)
+                    xbest, C = mf.optimise_params(t_full, y_full, series_index, C, bounds_list, 
+                                                delta_0=args.delta_0,
+                                                delta_1=args.delta_1,
+                                                planet_p=p,
+                                                planet_A=A,
+                                                planet_B=B,
+                                                fit_planet=args.fit_planet,
+                                                change_C=args.change_C)
+                
+                    loglike = -1*mf.negloglike_nocyc(xbest, t_full, y_full, series_index,C, rv_std, inject_planet=args.fit_planet)[0]
+
+                    if loglike > best_loglike:
+                        best_loglike = loglike
+                        xbest_all = xbest
+                        best_p_init = p
+
+        params, _ = mf.get_opt_params(C)
+        C.set_param(xbest_all[:len(params)], params)
+
+        fit_plot_name_optim = "results_nocyc/optim_fit_plot_" + args.output_name + ".png"
+        mf.plot_fit(t_full, y_full, yerr_full, series_index, C, xbest_all, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
+
+        np.save("results_nocyc/xbest_" + args.output_name + ".npy", xbest_all)
+    else:
+        C = cov.Cov(
+                    t_full,
+                    err=term.Error(yerr_full),
+                    rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
+                    rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
+                    rot = MultiSeriesKernel(term.MEPKernel(args.sig,args.prot,args.rho,args.eta), series_index, 
+                            np.array([stds[0], stds[1]]), 
+                            np.array([stds[0], 0.0])
+                        ),
+                    )
+
+        xbest_all, C = mf.optimise_params(t_full, y_full, series_index, C, bounds_list, 
+                                                delta_0=args.delta_0,
+                                                delta_1=args.delta_1,
+                                                fit_planet=args.fit_planet,
+                                                change_C=args.change_C)
+        
+        loglike = -1*mf.negloglike_nocyc(xbest_all, t_full, y_full, series_index,C, rv_std, inject_planet=args.fit_planet)[0]
+        params, _ = mf.get_opt_params(C)
+        C.set_param(xbest_all[:len(params)], params)
+
+        fit_plot_name_optim = "results_nocyc/optim_fit_plot_" + args.output_name + ".png"
+        mf.plot_fit(t_full, y_full, yerr_full, series_index, C, xbest_all, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
+
+        np.save("results_nocyc/xbest_" + args.output_name + ".npy", xbest_all)
+
+    # xbest, C = mf.optimise_params(t_full, y_full, series_index, C, bounds_list, 
+    #                             delta_0=args.delta_0,
+    #                             delta_1=args.delta_1,
+    #                             planet_p=args.planet_p,
+    #                             planet_A=args.planet_A_fit,
+    #                             planet_B=args.planet_B_fit,
+    #                             fit_planet=args.fit_planet,
+    #                             change_C=args.change_C)
+
+    # fit_plot_name_optim = "results/optim_fit_plot_" + args.output_name + ".png"
+    # mf.plot_fit(t_full, y_full, yerr_full, series_index, C, xbest, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
+    # bounds_list[-3] = (np.max([best_p_init - 10, 1.1]), np.min([best_p_init + 10, 400.0]))
+    # print("bounds: ",bounds_list)
+    if args.run_mcmc:
+
+        if args.fit_planet:
+            bounds_list[-3] = (np.max([best_p_init - 10, 1.1]), np.min([best_p_init + 10, 400.0]))
+        
+        sampler = mf.run_emcee(t_full, y_full, series_index, C, xbest_all, bounds_list, run_length=args.run_length, planet=args.fit_planet)
+        # np.save("results/sampler_" + args.output_name + ".npy", sampler.get_chain())
+
+        # chains_plot_name = "results/chains_plot_" + args.output_name + ".png"
+        # mf.plot_chains(sampler, C, planet=args.fit_planet, output_name=chains_plot_name)
+
+        corner_plot_name = "results_nocyc/corner_plot_" + args.output_name + ".png"
+        mf.plot_corner(sampler, C, discard=args.corner_discard,planet=args.fit_planet,output_name=corner_plot_name)
+
+        map_params, _ = mf.get_MAP_params(sampler, args.map_burn, args.map_thin)
+        np.save("results_nocyc/map_params_" + args.output_name + ".npy", map_params)
+    # params, _ = mf.get_opt_params(C)
+    # C.set_param(map_params[:len(params)], params)
+
+    # fit_plot_name_map = "results/MAP_fit_plot_" + args.output_name + ".png"
+    # mf.plot_fit(t_full, y_full, yerr_full, series_index, C, xbest, rv_std=rv_std,output_name=fit_plot_name_map,inject_planet=args.fit_planet)
 
 if __name__ == "__main__":
     main()
