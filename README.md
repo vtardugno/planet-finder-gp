@@ -13,14 +13,30 @@ planet_finder_model/     current working model (stationary multi-series GP kerne
   CV.py                    12-fold cross-validation + full-dataset AIC/BIC model comparison
   data/                    Solar_Data/, HD4628/ input time series
   results/                 saved fits (xbest, sampler, map_params .npy)
-  notebooks/               exploratory notebook
+  notebooks/               exploratory notebook (functions.py-based)
 
   multigp_cycle_variant/   alternative model: stationary kernel + a warped-sine cyclic
                            term added to the *mean* (not the covariance) -- a parallel
                            approach to functions.py's cycle-subtraction, not a non-
                            stationary kernel
-    multiGP_functions.py
-    notebooks/             multiGP_run.ipynb, try_stuff.ipynb, try_stuff_HD4628.ipynb
+    multiGP_functions.py    alpha/negloglike/plot_fit/load_and_norm_data helpers
+    notebooks/
+      run_model.ipynb        the one notebook to run this model and see plots -- set
+                             STAR ("Sun"/"HD4628") and FIT_PLANET at the top. The Sun
+                             preset is verified to reproduce multiGP_run.ipynb's and
+                             sun_data_inject.ipynb's results (both since removed); the
+                             HD4628 preset is NOT a verified match for hd4628_fit.ipynb
+                             (see below) but produces qualitatively similar fits.
+      hd4628_fit.ipynb        kept separately, not consolidated into run_model.ipynb:
+                             it loads data normalised with unshifted absolute time and
+                             fits a planet with its own hand-rolled K/phi negloglike
+                             (not multiGP_functions.py's A/B convention), so
+                             run_model.ipynb's HD4628 preset -- built on the shared
+                             mf.negloglike -- can't exactly reproduce it. Both show the
+                             same qualitative behaviour (RHK fits reasonably, RV fit is
+                             weak), but that hasn't been confirmed to be a quantitative
+                             match, so this notebook stays as the reference instead of
+                             being deleted.
 
   rot_cyc_kernel_variant/  alternative model: additive sum of two kernel terms (rotation
                            SHOKernel + a separate cycle SHOKernel), not a non-stationary
@@ -33,15 +49,24 @@ non_stationary_gp/        the true non-stationary GP kernel: covariance is
                            i.e. the process's variance itself is modulated by activity-
                            cycle phase -- what this folder is actually named for
   nskernel/                the non-stationary kernel implementation
-    nskernel.py            NonStationaryKernel class (spleaf term.Kernel subclass)
+    nskernel.py             NonStationaryKernel class (spleaf term.Kernel subclass)
     test_nsgp.py, test_nsgp_qp.py
-    data/                  Solar_Data/, HD4628/, saved kernel/sample arrays, synthetic
-                           realization .sav files (also used by rot_cyc_kernel_variant/)
-  notebooks/               research progression: data generation (gendata_from_nsk) ->
-                           kernel dev (nonstat_kernel, nonstat_kerne_GOODl) -> applied to
-                           real data (sun_data_nonstat, hd4628_fit, sun_data_inject,
-                           sun_finalGP_model) -> validation (nonstat_kern_val,
-                           sun_nonstat_kern_val)
+    data/                   Solar_Data/, HD4628/, saved kernel/sample arrays, synthetic
+                            realization .sav files (also used by rot_cyc_kernel_variant/)
+  notebooks/
+    sun_data_nonstat.ipynb   the one notebook applying the true non-stationary kernel to
+                             real data -- currently Sun only (star_name/data_path are
+                             variables at the top, ready to point at another star's data
+                             when/if that's fit)
+    gendata_from_nsk.ipynb   generates synthetic data from the model (parameter recovery)
+    nonstat_kernel.ipynb, nonstat_kerne_GOODl.ipynb
+                             kernel development on synthetic data
+    nonstat_kern_val.ipynb, sun_nonstat_kern_val.ipynb
+                             validation: compares the non-stationary kernel against
+                             simpler baselines (deliberately uses more than one
+                             technique -- that's the point of a validation notebook)
+    sun_finalGP_model.ipynb  a 3-series (rv/tom_f/tom_v) variant, structurally different
+                             from everything else here -- left as-is, unreviewed
 
 archive/pyaneti_stuff/    old pyaneti MCMC test runs, kept for reference only
 ```
@@ -85,4 +110,16 @@ and `non_stationary_GP/`) into one repo. `non_stationary_gp/` was originally its
 repo (`nonstat_gp`, tracking the non-stationary kernel work); that history is preserved here.
 `multigp_cycle_variant/` and `rot_cyc_kernel_variant/` were later moved out of
 `non_stationary_gp/` into `planet_finder_model/` once it became clear they don't actually
-use the non-stationary kernel technique.
+use the non-stationary kernel technique. `multigp_cycle_variant/run_model.ipynb`
+consolidates near-duplicate per-star notebooks that hand-rolled the same alpha-in-mean
+technique into one notebook parameterized by star name. Consolidating exposed a real bug:
+an early version fixed the kernel's `sig` parameter at `np.var(y_full)` for every star,
+but the original Sun notebook actually fixed it at `1.0` throughout optimisation/MCMC
+(only substituting the empirical variance for the final plot) -- using the wrong value
+collapsed the RHK fit. After matching the original recipe exactly (sig, bounds, and a
+non-zero parameter warm-start), the Sun preset was confirmed to reproduce the original
+notebooks' results, and `multiGP_run.ipynb`/`sun_data_inject.ipynb` were removed.
+`hd4628_fit.ipynb` was kept rather than removed: it turned out to differ from the shared
+`multiGP_functions.py` pipeline more deeply (normalised data, unshifted time, a bespoke
+K/phi planet fit), so `run_model.ipynb`'s HD4628 preset -- while qualitatively similar --
+isn't a verified match for it the way the Sun preset is.
