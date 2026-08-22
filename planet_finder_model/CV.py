@@ -74,6 +74,7 @@ def build_parser():
     parser.add_argument("--planet-B-fit", type=float, default=0.01, help="Initial planet phi")
     parser.add_argument("--fit-planet", action=argparse.BooleanOptionalAction, default=False, help="Include planet parameters in the optimisation")
     parser.add_argument("--change-C", action=argparse.BooleanOptionalAction, default=True, help="Write the optimised kernel parameters back into C")
+    parser.add_argument("--output-csv", default="results/cv_results.csv", help="Where to save per-fold CV results")
     # Outputs
     # parser.add_argument("--fit-output", default="fit_plot.png", help="Output name for the fit plot")
     # parser.add_argument("--chains-output", default="chains_plot.png", help="Output name for the chains plot")
@@ -130,6 +131,7 @@ def main():
     
     loglike_total_cyc = 0
     loglike_total_nocyc = 0
+    cv_rows = []
 
 
     for fold in range(12):
@@ -164,7 +166,12 @@ def main():
         (args.delta0_min, args.delta0_max),
         (-5.0, 5.0),
         ]
-        
+
+        planet_p_fold = args.planet_p
+        if args.fit_planet and planet_p_fold is None:
+            periods, _ = mf.period_guess(t_full_train, y_full_train, yerr_full_train, series_index_train, PMIN=1.1, PMAX=310.0, MAX_FAP=1e-5, MAX_NPL=2, plot=False)
+            planet_p_fold = float(periods[1]) if len(periods) >= 2 else float(periods[0])
+
         C = cov.Cov(
                     t_full_train,
                     err=term.Error(yerr_full_train),
@@ -176,10 +183,10 @@ def main():
                         ),
                     )
         
-        xbest, C = mf.optimise_params(t_full_train, y_full_train, series_index_train, C, bounds_list_cyc, 
+        xbest, C = mf.optimise_params(t_full_train, y_full_train, series_index_train, C, bounds_list_nocyc,
                                 delta_0=args.delta_0,
                                 delta_1=args.delta_1,
-                                planet_p=args.planet_p,
+                                planet_p=planet_p_fold,
                                 planet_A=args.planet_A_fit,
                                 planet_B=args.planet_B_fit,
                                 fit_planet=args.fit_planet,
@@ -190,19 +197,22 @@ def main():
                                 err=term.Error(yerr_full_test),
                                 rv_jit=term.InstrumentJitter(series_index_test[0], xbest[0]),
                                 rhk_jit=term.InstrumentJitter(series_index_test[1], xbest[1]),
-                                rot = MultiSeriesKernel(term.MEPKernel(args.sig,xbest[2],xbest[3],xbest[4]), series_index_test, 
-                                        np.array([xbest[5], xbest[6]]), 
+                                rot = MultiSeriesKernel(term.MEPKernel(args.sig,xbest[2],xbest[3],xbest[4]), series_index_test,
+                                        np.array([xbest[5], xbest[6]]),
                                         np.array([xbest[7], 0.0])
                                     ),
                                 )
 
-        loglike_total_nocyc = loglike_total_nocyc + -1*mf.negloglike_nocyc(xbest, t_full_test, y_full_test, series_index_test, C_test, rv_std, inject_planet=args.fit_planet)[0]
+        test_loglike_nocyc = -1*mf.negloglike_nocyc(xbest, t_full_test, y_full_test, series_index_test, C_test, rv_std, inject_planet=args.fit_planet)[0]
+        loglike_total_nocyc = loglike_total_nocyc + test_loglike_nocyc
+        print(f"fold {fold:02d} [no_cycle]: test loglike={test_loglike_nocyc:.6f}")
+        cv_rows.append({"fold": fold, "mode": "no_cycle", "test_loglike": test_loglike_nocyc, "planet_p": planet_p_fold})
         fit_plot_name_optim = f"results/optim_fit_plot_False_{fold}.png"
         mf.plot_fit(t_full_train, y_full_train, yerr_full_train, series_index_train, C, xbest, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
 
         # CYCLE PART
 
-        cycle_out_name = f"results/cycle_fit.png"
+        cycle_out_name = f"results/cycle_fit_{fold}.png"
         rv_fit, rhk_fit, params = mf.fit_cycle(t_full_train, y_full_train, series_index_train, b0=args.cycle_b0, P0=args.cycle_P0, phi0=args.cycle_phi0, plot=args.cycle_plot, print_results=args.cycle_print_results, output_name=cycle_out_name, return_fit=True)
         y_full_train[series_index_train[0]] = y_full_train[series_index_train[0]] - rv_fit
         y_full_train[series_index_train[1]] = y_full_train[series_index_train[1]] - rhk_fit
@@ -220,10 +230,10 @@ def main():
                         ),
                     )
         
-        xbest, C = mf.optimise_params(t_full_train, y_full_train, series_index_train, C, bounds_list_cyc, 
+        xbest, C = mf.optimise_params(t_full_train, y_full_train, series_index_train, C, bounds_list_cyc,
                                 delta_0=args.delta_0,
                                 delta_1=args.delta_1,
-                                planet_p=args.planet_p,
+                                planet_p=planet_p_fold,
                                 planet_A=args.planet_A_fit,
                                 planet_B=args.planet_B_fit,
                                 fit_planet=args.fit_planet,
@@ -234,8 +244,8 @@ def main():
                                 err=term.Error(yerr_full_test),
                                 rv_jit=term.InstrumentJitter(series_index_test[0], xbest[0]),
                                 rhk_jit=term.InstrumentJitter(series_index_test[1], xbest[1]),
-                                rot = MultiSeriesKernel(term.MEPKernel(args.sig,xbest[2],xbest[3],xbest[4]), series_index_test, 
-                                        np.array([xbest[5], xbest[6]]), 
+                                rot = MultiSeriesKernel(term.MEPKernel(args.sig,xbest[2],xbest[3],xbest[4]), series_index_test,
+                                        np.array([xbest[5], xbest[6]]),
                                         np.array([xbest[7], 0.0])
                                     ),
                                 )
@@ -244,9 +254,12 @@ def main():
         a1, c1, a2, c2, b, P, phi = params
         y_full_test[series_index_test[0]] = y_full_test[series_index_test[0]] - mf.model_rv(t_full_test[series_index_test[0]], a1, c1, b, P, phi)
         y_full_test[series_index_test[1]] = y_full_test[series_index_test[1]] - mf.model_rhk(t_full_test[series_index_test[1]], a2, c2, b, P, phi)
-        
-        loglike_total_cyc = loglike_total_cyc + -1*mf.negloglike_nocyc(xbest, t_full_test, y_full_test, series_index_test, C_test, rv_std, inject_planet=args.fit_planet)[0]
-            
+
+        test_loglike_cyc = -1*mf.negloglike_nocyc(xbest, t_full_test, y_full_test, series_index_test, C_test, rv_std, inject_planet=args.fit_planet)[0]
+        loglike_total_cyc = loglike_total_cyc + test_loglike_cyc
+        print(f"fold {fold:02d} [cycle]: test loglike={test_loglike_cyc:.6f}")
+        cv_rows.append({"fold": fold, "mode": "cycle", "test_loglike": test_loglike_cyc, "planet_p": planet_p_fold})
+
         fit_plot_name_optim = f"results/optim_fit_plot_True_{fold}.png"
         mf.plot_fit(t_full_train, y_full_train, yerr_full_train, series_index_train, C, xbest, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
 
@@ -254,6 +267,15 @@ def main():
 
     print(f"Total log-likelihood with cycle fit: {loglike_total_cyc}")
     print(f"Total log-likelihood without cycle fit: {loglike_total_nocyc}")
+
+    try:
+        import pandas as pd
+        df = pd.DataFrame(cv_rows)
+        df.to_csv(args.output_csv, index=False)
+        print(f"\nSaved per-fold CV results to {args.output_csv}")
+    except Exception as exc:
+        print(f"\nCould not save CV results CSV: {exc}")
+        print(cv_rows)
 
     T = [t,t]
     Y = [y_rv, y_rhk]
