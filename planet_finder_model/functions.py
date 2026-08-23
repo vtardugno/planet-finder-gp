@@ -11,6 +11,88 @@ from scipy.interpolate import interp1d
 from sklearn.linear_model import LinearRegression 
 import astropy
 
+class NonStationaryKernel(term.Kernel):
+  r"""
+  Non-stationary rank 1 separable kernel.
+
+  .. math:: k(t, t') = alpha(t) * alpha(t')
+
+  Parameters
+  ----------
+  alpha_func : function
+    Function alpha_func(t, **kwargs) computing the amplitudes
+    from the times and hyper-parameters.
+  alpha_grad : function or None
+    Optional function alpha_grad(t, **kwargs) providing a dictionary
+    of derivatives of alpha with respect to hyper-parameters.
+    This is required to compute the gradient of the likelihood with
+    respect to hyper-parameters.
+  **kwargs:
+    Hyper-parameters to be provided to alpha_func and alpha_grad.
+  """
+
+  def __init__(self, alpha_func, alpha_grad=None, **kwargs):
+    super().__init__()
+    self._alpha_func = alpha_func
+    self._alpha_grad = alpha_grad
+    self._value = kwargs
+    self._param = list(self._value.keys())
+    self._r = 1
+
+  def _link(self, cov, offset):
+    super()._link(cov, offset)
+
+  def _compute(self):
+    self._alpha = self._alpha_func(self._cov.t, **self._value)
+    self._cov.U[:, self._offset] = self._alpha
+    self._cov.V[:, self._offset] = self._alpha
+    self._cov.A += self._alpha * self._alpha
+    self._cov.phi[:, self._offset] = 1
+
+  def _get_param(self, par):
+    return self._value[par]
+
+  def _set_param(self, *args, **kwargs):
+    for karg, arg in enumerate(args):
+      par = self._param[karg]
+      if par in kwargs:
+        raise Exception(f'NonStatKernel._set_param: parameter {par} multiply defined.')
+      kwargs[par] = arg
+    self._value.update(kwargs)
+
+  def _grad_param(self, grad_dU=None, grad_dV=None):
+
+    if grad_dU is not None or grad_dV is not None:
+      raise NotImplementedError()
+    
+
+    grad_alpha = (
+      2 * self._alpha * self._cov._grad_A
+      + self._cov._grad_U[:, self._offset]
+      + self._cov._grad_V[:, self._offset]
+    )
+
+    # if grad_dU is not None:
+    #   grad_alpha += grad_dU[:, self._offset]
+    # if grad_dV is not None:
+    #   grad_alpha += grad_dV[:, self._offset]
+
+    return {
+      key: grad_alpha @ dalpha_dpk
+      for key, dalpha_dpk in self._alpha_grad(self._cov.t, **self._value).items()
+    }
+
+  def _compute_t2(
+    self, t2, dt2, U2, V2, phi2, ref2left, dt2left, dt2right, phi2left, phi2right
+  ):
+    alpha2 = self._alpha_func(t2, **self._value)
+    U2[:, self._offset] = alpha2
+    V2[:, self._offset] = alpha2
+    phi2[:, self._offset] = 1
+    phi2left[:, self._offset] = 1
+    phi2right[:, self._offset] = 1
+
+
 
 def planet_injection(t, P, A, B):
     return A * np.sin(2 * np.pi * (t) / (P+0.000001)) + B * np.cos(2 * np.pi * (t) / (P+0.000001))
@@ -78,6 +160,25 @@ def load_and_norm_data(path,star_name,normalise=True,inject_planet=True, planet_
 def shared_core(x, b, P, phi):
     return b*x + np.sin(2*np.pi*x/P + phi)
 
+def shared_core_grads(x, b, P, phi):
+    arg = 2 * np.pi * x / P + phi
+
+    dcore_db = x
+    dcore_dP = -(2 * np.pi * x / (P**2 + 1e-12)) * np.cos(arg)
+    dcore_dphi = np.cos(arg)
+
+    return dcore_db, dcore_dP, dcore_dphi
+
+def shared_core_and_grads(x, b, P, phi):
+    arg = 2 * np.pi * x / P + phi
+    core = b * x + np.sin(arg)
+
+    dcore_db = x
+    dcore_dP = -(2 * np.pi * x / (P**2 + 1e-12)) * np.cos(arg)
+    dcore_dphi = np.cos(arg)
+
+    return core, dcore_db, dcore_dP, dcore_dphi
+
 # RV model
 def model_rv(x, a1, c1, b, P, phi):
     return a1 + c1 * shared_core(x, b, P, phi)
@@ -102,7 +203,7 @@ def joint_model(x_concat,
 
     return np.concatenate([y1, y2])
 
-def fit_cycle(t_full, y_full, series_index, b0=0, P0=4000, phi0=0, print_results=False, plot=False, output_name='cycle_fit.png', return_fit = False):
+def fit_cycle(t_full, y_full, series_index, b0=0, P0=4000, phi0=0, print_results=False, plot=False, output_name='cycle_fit.png'):
     x = t_full[series_index[0]]  # same for both series, but just take from one
     x_concat = np.concatenate([t_full[series_index[0]], t_full[series_index[1]]])
     y_rv = y_full[series_index[0]]
@@ -144,31 +245,23 @@ def fit_cycle(t_full, y_full, series_index, b0=0, P0=4000, phi0=0, print_results
         print(f"b    = {b}")
         print(f"P    = {P}")
         print(f"phi  = {phi}")
-        print("\nRV parameters:")
-        print(f"a1   = {a1}")
-        print(f"c1   = {c1}")
-        print("\nRHK parameters:")
-        print(f"a2   = {a2}")
-        print(f"c2   = {c2}")
 
     if plot == True:
 
-        fig, axs = plt.subplots(2, 1, figsize=(15, 10), sharex=True)
+        fig, axs = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
 
 # RV panel
-        axs[0].plot(x, y_rv, '.', alpha=0.7, color='k',markersize=2, label='RV')
-        axs[0].plot(x, rv_fit, linewidth=3, color = 'g',label='RV fit')
-        axs[0].set_ylabel("RV",fontsize=14)
-        axs[0].legend(fontsize=14)
-        axs[0].tick_params(axis='both', labelsize=12)
+        axs[0].plot(x, y_rv, '.', alpha=0.4, markersize=2, label='RV')
+        axs[0].plot(x, rv_fit, linewidth=3, label='RV fit')
+        axs[0].set_ylabel("RV")
+        axs[0].legend()
 
 # RHK panel
-        axs[1].plot(x, y_rhk, '.', alpha=0.7, color='k', markersize=2, label='RHK')
-        axs[1].plot(x, rhk_fit, linewidth=3, color='g', label='RHK fit')
-        axs[1].set_ylabel("RHK",fontsize=14)
-        axs[1].set_xlabel("Time",fontsize=14)
-        axs[1].legend(fontsize=14)
-        axs[1].tick_params(axis='both', labelsize=12)
+        axs[1].plot(x, y_rhk, '.', alpha=0.4, markersize=2, label='RHK')
+        axs[1].plot(x, rhk_fit, linewidth=3, label='RHK fit')
+        axs[1].set_ylabel("RHK")
+        axs[1].set_xlabel("Time")
+        axs[1].legend()
 
         plt.tight_layout()
         plt.savefig(output_name)
@@ -189,56 +282,14 @@ def fit_cycle(t_full, y_full, series_index, b0=0, P0=4000, phi0=0, print_results
         # plt.legend()
         # # plt.show()
         # plt.savefig(f'rhk_{output_name}')
-    if return_fit == True:
-        return rv_fit, rhk_fit, params
-    else:
-        return rv_fit, rhk_fit
+
+    return rv_fit, rhk_fit
 
 
 def get_opt_params(C):
     params_inds = [k for k, key in enumerate(C.param) if key != 'rot.sig' and key != "rot.beta_1"]  
     params = [C.param[k] for k in params_inds]
     return params, params_inds
-
-def negloglike_cyc(theta, t_full, y_full, series_index,C, rv_std = 1.0, inject_planet=False):
-#   ADD GRADIENTS FOR CYCLE PARAMETERS
-  params, params_inds = get_opt_params(C)
-
-  C.set_param(theta[:len(params)], params)
-
-  y_model = y_full.copy()
-  if inject_planet == True:
-    y_model[series_index[0]] -= (planet_injection(t_full[series_index[0]], theta[15], theta[16], theta[17]) )/rv_std
-
-  y_model[series_index[0]] -=  model_rv(t_full[series_index[0]], theta[8], theta[10], theta[12], theta[13], theta[14])
-  y_model[series_index[1]] -=  model_rhk(t_full[series_index[1]], theta[9], theta[11], theta[12], theta[13], theta[14])
-
-  # gradient§
-  nll = -C.loglike(y_model)
-
-  lg = C.loglike_grad()
-  dL_dy = np.asarray(lg[0]).reshape(-1)      # shape (N_total,) 
-  dL_dparams = np.asarray(lg[1]).reshape(-1) # shape (12,)      
-
-  base_grad = - dL_dparams[params_inds]
-
-  # gradients wrt delta (additive offsets)
-  grad_delta_0 = np.sum(dL_dy[series_index[0]])
-  grad_delta_1 = np.sum(dL_dy[series_index[1]])
-
-
-  if inject_planet == True:
-    argument = 2 * np.pi * t_full[series_index[0]] / (theta[10]+0.000001)
-    grad_planet_p = np.sum(dL_dy[series_index[0]] * (1/rv_std)*(-theta[11] * 2 * np.pi * t_full[series_index[0]] / ((theta[10]+0.000001)**2) * np.cos(argument)+theta[12]*2*np.pi*t_full[series_index[0]]/((theta[10]+0.000001)**2)*np.sin(argument))) 
-    grad_planet_a = np.sum(dL_dy[series_index[0]] * (1/rv_std)*(np.sin(argument)))
-    grad_planet_b = np.sum(dL_dy[series_index[0]] * (1 / rv_std) * (np.cos(argument)))
-    nll_grad = np.concatenate([np.asarray(base_grad).ravel(), np.array([grad_delta_0, grad_delta_1, grad_planet_p, grad_planet_a, grad_planet_b])])
-  else:
-    nll_grad = np.concatenate([np.asarray(base_grad).ravel(), np.array([grad_delta_0, grad_delta_1])])
-  # nll_grad = -C.loglike_grad()[1][fitted]
-
-  return (nll, nll_grad)
-
 
 def negloglike_nocyc(theta, t_full, y_full, series_index,C, rv_std = 1.0, inject_planet=False):
   
@@ -280,7 +331,107 @@ def negloglike_nocyc(theta, t_full, y_full, series_index,C, rv_std = 1.0, inject
   return (nll, nll_grad)
 
 
-def optimise_params(t_full, y_full, series_index, C, bounds_list, delta_0 = -0.001, delta_1 = 0.001, planet_p = 40.05, planet_A = 0.0005, planet_B = 0.0005, fit_planet = True, change_C = True):
+
+def negloglike_cyc(theta, t_full, y_full, series_index,C, rv_std = 1.0, inject_planet=False):
+  
+  params, params_inds = get_opt_params(C)
+
+  C.set_param(theta[:len(params)], params)
+
+  y_model = y_full.copy()
+  if inject_planet == True:
+    y_model[series_index[0]] -= (planet_injection(t_full[series_index[0]], theta[15], theta[16], theta[17]) )/rv_std
+  
+  core0, dcore0_db, dcore0_dP, dcore0_dphi = shared_core_and_grads(t_full[series_index[0]], theta[8], theta[9], theta[10])
+  core1, dcore1_db, dcore1_dP, dcore1_dphi = shared_core_and_grads(t_full[series_index[1]], theta[8], theta[9], theta[10])
+  a0, a1 = theta[11], theta[12]
+  d0, d1 = theta[13], theta[14]
+  y_model[series_index[0]] -=  a0*core0 + d0
+  y_model[series_index[1]] -=  a1*core1 + d1
+
+  # gradient§
+  nll = -C.loglike(y_model)
+
+  lg = C.loglike_grad()
+  dL_dy = np.asarray(lg[0]).reshape(-1)      # shape (N_total,) 
+  dL_dparams = np.asarray(lg[1]).reshape(-1) # shape (12,)      
+
+  base_grad = - dL_dparams[params_inds]
+
+  # gradients wrt delta (additive offsets)
+  grad_delta_0 = np.sum(dL_dy[series_index[0]])
+  grad_delta_1 = np.sum(dL_dy[series_index[1]])
+
+  grad_amp_0 = np.sum(dL_dy[series_index[0]] * core0)
+  grad_amp_1 = np.sum(dL_dy[series_index[1]] * core1)
+
+  grad_b = (
+        np.sum(dL_dy[series_index[0]] * a0 * dcore0_db) +
+        np.sum(dL_dy[series_index[1]] * a1 * dcore1_db))
+
+  grad_P = (
+        np.sum(dL_dy[series_index[0]] * a0 * dcore0_dP) +
+        np.sum(dL_dy[series_index[1]] * a1 * dcore1_dP))
+
+  grad_phi = (
+        np.sum(dL_dy[series_index[0]] * a0 * dcore0_dphi) +
+        np.sum(dL_dy[series_index[1]] * a1 * dcore1_dphi))
+
+
+  if inject_planet == True:
+    argument = 2 * np.pi * t_full[series_index[0]] / (theta[10]+0.000001)
+    grad_planet_p = np.sum(dL_dy[series_index[0]] * (1/rv_std)*(-theta[11] * 2 * np.pi * t_full[series_index[0]] / ((theta[10]+0.000001)**2) * np.cos(argument)+theta[12]*2*np.pi*t_full[series_index[0]]/((theta[10]+0.000001)**2)*np.sin(argument))) 
+    grad_planet_a = np.sum(dL_dy[series_index[0]] * (1/rv_std)*(np.sin(argument)))
+    grad_planet_b = np.sum(dL_dy[series_index[0]] * (1 / rv_std) * (np.cos(argument)))
+    nll_grad = np.concatenate([np.asarray(base_grad).ravel(), np.array([grad_b, grad_P, grad_phi,grad_amp_0, grad_amp_1,grad_delta_0, grad_delta_1,grad_planet_p, grad_planet_a, grad_planet_b])])
+  else:
+    nll_grad = np.concatenate([np.asarray(base_grad).ravel(), np.array([grad_b, grad_P, grad_phi,grad_amp_0, grad_amp_1,grad_delta_0, grad_delta_1])])
+  # nll_grad = -C.loglike_grad()[1][fitted]
+
+  return (nll, nll_grad)
+
+
+# def negloglike_nonstat(theta, t_full, y_full, series_index,C, rv_std = 1.0, inject_planet=False):
+  
+#   params, params_inds = get_opt_params(C)
+
+#   C.set_param(theta[:len(params)], params)
+  
+#   y_model = y_full.copy()
+#   if inject_planet == True:
+#     y_model[series_index[0]] -= (planet_injection(t_full[series_index[0]], theta[10], theta[11], theta[12]) )/rv_std
+
+
+#   fc = shared_core(t_full, theta[2],theta[3],theta[4])
+  
+#   y_model[series_index[0]] -= (theta[-4]*fc[series_index[0]] + theta[-2])
+#   y_model[series_index[1]] -= (theta[-3]*fc[series_index[1]] + theta[-1])
+#   nll = -C.loglike(y_model)
+#   # gradient
+#   lg = C.loglike_grad()
+#   dL_dy = np.asarray(lg[0]).reshape(-1)      # shape (N_total,) 
+#   dL_dparams = np.asarray(lg[1]).reshape(-1) # shape (12,)      
+
+#   base_grad = - dL_dparams[fitted]  
+
+#   # gradients wrt gamma (scale of fc)
+#   grad_gamma_0 = np.sum(dL_dy[series_index[0]] * fc_unnorm[series_index[0]])
+#   grad_gamma_1 = np.sum(dL_dy[series_index[1]] * fc_unnorm[series_index[1]])
+#   # gradients wrt delta (additive offsets)
+#   grad_delta_0 = np.sum(dL_dy[series_index[0]])
+#   grad_delta_1 = np.sum(dL_dy[series_index[1]])
+
+#   nll_grad = np.concatenate([np.asarray(base_grad).ravel(), np.array([grad_gamma_0, grad_gamma_1, grad_delta_0, grad_delta_1])])
+
+
+#   # nll_grad = -C.loglike_grad()[1][fitted]
+
+#   return (nll, nll_grad)
+
+
+
+
+def optimise_params(t_full, y_full, series_index, C, bounds_list, delta_0 = -0.001, delta_1 = 0.001, planet_p = 40.05, planet_A = 0.0005, planet_B = 0.0, fit_planet = True, change_C = True):
 
     params, _ = get_opt_params(C)
 
@@ -301,11 +452,37 @@ def optimise_params(t_full, y_full, series_index, C, bounds_list, delta_0 = -0.0
     return xbest, C
 
 
+def optimise_params_cyc(t_full, y_full, series_index, C, bounds_list, b = 0.0, P = 4000, phi = 0.0, planet_p = 40.05, planet_A = 0.0005, planet_B = 0.0, fit_planet = True, change_C = True):
+
+    a0 = np.mean(y_full[series_index[0]])
+    a1 = np.mean(y_full[series_index[1]])
+    d0 = np.std(y_full[series_index[0]])
+    d1 = np.std(y_full[series_index[1]])
+
+    params, _ = get_opt_params(C)
+
+    x0 = C.get_param(params)
+
+    if fit_planet == True:
+        x0 = np.append(x0,[b, P, phi, a0, a1, d0, d1, planet_p, planet_A, planet_B])  
+        result = fmin_l_bfgs_b(negloglike_cyc, x0, args=(t_full, y_full, series_index, C, 1.0, True), bounds=bounds_list)
+        xbest = result[0]
+    else:
+        x0 = np.append(x0,[b, P, phi, a0, a1, d0, d1])  
+        result = fmin_l_bfgs_b(negloglike_cyc, x0, args=(t_full, y_full, series_index, C, 1.0, False), bounds=bounds_list)
+        xbest = result[0]
+
+    if change_C == True:
+        C.set_param(xbest[:len(params)], params)
+
+    return xbest, C
+
+
 def log_prior(theta, bounds_list, planet = True):
     if planet == True:
         rv_jit, rhk_jit, rot_P0, rot_rho, rot_eta, rot_alpha_0, rot_alpha_1, rot_beta_0, delta_0, delta_1, planet_period, planet_A, planet_B = theta
         if bounds_list[0][0] < rv_jit < bounds_list[0][1] and bounds_list[1][0] < rhk_jit < bounds_list[1][1] and bounds_list[2][0] < rot_P0 < bounds_list[2][1] and bounds_list[3][0] < rot_rho < bounds_list[3][1] and bounds_list[4][0] < rot_eta < bounds_list[4][1] and bounds_list[5][0] < rot_alpha_0 < bounds_list[5][1] and bounds_list[6][0] < rot_alpha_1 < bounds_list[6][1] and bounds_list[7][0] < rot_beta_0 < bounds_list[7][1] and bounds_list[8][0] < delta_0 < bounds_list[8][1] and bounds_list[9][0] < delta_1 < bounds_list[9][1] and bounds_list[10][0] < planet_period < bounds_list[10][1] and bounds_list[11][0] < planet_A < bounds_list[11][1] and bounds_list[12][0] < planet_B < bounds_list[12][1]:
-            return -np.log(planet_A) - np.log(planet_B)
+            return -np.log(planet_A) - np.log(planet_B)  
         # planet_phi = planet_phi % (2*np.pi)
         return -np.inf
         
@@ -315,6 +492,20 @@ def log_prior(theta, bounds_list, planet = True):
             return 0
         return -np.inf
 
+
+def log_prior_cyc(theta, bounds_list, planet = True):
+    if planet == True:
+        rv_jit, rhk_jit, rot_P0, rot_rho, rot_eta, rot_alpha_0, rot_alpha_1, rot_beta_0, b, P, phi, a0, a1, d0, d1, planet_period, planet_A, planet_B = theta
+        if bounds_list[0][0] < rv_jit < bounds_list[0][1] and bounds_list[1][0] < rhk_jit < bounds_list[1][1] and bounds_list[2][0] < rot_P0 < bounds_list[2][1] and bounds_list[3][0] < rot_rho < bounds_list[3][1] and bounds_list[4][0] < rot_eta < bounds_list[4][1] and bounds_list[5][0] < rot_alpha_0 < bounds_list[5][1] and bounds_list[6][0] < rot_alpha_1 < bounds_list[6][1] and bounds_list[7][0] < rot_beta_0 < bounds_list[7][1] and bounds_list[8][0] < b < bounds_list[8][1] and bounds_list[9][0] < P < bounds_list[9][1] and bounds_list[10][0] < phi < bounds_list[10][1] and bounds_list[11][0] < a0 < bounds_list[11][1] and bounds_list[12][0] < a1 < bounds_list[12][1] and bounds_list[13][0] < d0 < bounds_list[13][1] and bounds_list[14][0] < d1 < bounds_list[14][1] and bounds_list[15][0] < planet_period < bounds_list[15][1] and bounds_list[16][0] < planet_A < bounds_list[16][1] and bounds_list[17][0] < planet_B < bounds_list[17][1]:
+            return -np.log(planet_A) - np.log(planet_B)  
+        # planet_phi = planet_phi % (2*np.pi)
+        return -np.inf
+        
+    else:
+        rv_jit, rhk_jit, rot_P0, rot_rho, rot_eta, rot_alpha_0, rot_alpha_1, rot_beta_0, b, P, phi, a0, a1, d0, d1 = theta
+        if bounds_list[0][0] < rv_jit < bounds_list[0][1] and bounds_list[1][0] < rhk_jit < bounds_list[1][1] and bounds_list[2][0] < rot_P0 < bounds_list[2][1] and bounds_list[3][0] < rot_rho < bounds_list[3][1] and bounds_list[4][0] < rot_eta < bounds_list[4][1] and bounds_list[5][0] < rot_alpha_0 < bounds_list[5][1] and bounds_list[6][0] < rot_alpha_1 < bounds_list[6][1] and bounds_list[7][0] < rot_beta_0 < bounds_list[7][1] and bounds_list[8][0] < b < bounds_list[8][1] and bounds_list[9][0] < P < bounds_list[9][1] and bounds_list[10][0] < phi < bounds_list[10][1] and bounds_list[11][0] < a0 < bounds_list[11][1] and bounds_list[12][0] < a1 < bounds_list[12][1] and bounds_list[13][0] < d0 < bounds_list[13][1] and bounds_list[14][0] < d1 < bounds_list[14][1]:
+            return 0
+        return -np.inf
 
 
 def log_probability(theta, t_full, y_full, series_index, C, bounds_list, planet = True):
@@ -327,6 +518,16 @@ def log_probability(theta, t_full, y_full, series_index, C, bounds_list, planet 
     else:
         return lp + -1*negloglike_nocyc(theta, t_full, y_full, series_index, C, 1.0, False)[0]
 
+
+def log_probability_cyc(theta, t_full, y_full, series_index, C, bounds_list, planet = True):
+    # params, params_inds = get_opt_params(C)
+    lp = log_prior_cyc(theta, bounds_list, planet)
+    if not np.isfinite(lp):
+        return -np.inf
+    if planet == True:
+        return lp + -1*negloglike_cyc(theta, t_full, y_full, series_index, C, 1.0, True)[0]
+    else:
+        return lp + -1*negloglike_cyc(theta, t_full, y_full, series_index, C, 1.0, False)[0]
 
 def run_emcee(t_full, y_full, series_index, C, x0, bounds_list, run_length = 3000, planet = True):
 
@@ -344,7 +545,7 @@ def run_emcee(t_full, y_full, series_index, C, x0, bounds_list, run_length = 300
 
 
 def plot_fit(t_full, y_full, yerr_full, series_index, C, xbest, rv_std = 1.0, output_name = 'fit_plot.png', return_residuals=True, inject_planet=True):
-
+    print("xbest:", xbest)
     tsmooth = np.linspace(np.min(t_full), np.max(t_full), 1000)
     _, axs = plt.subplots(2, 1, sharex=True, figsize=(15, 10))
 
@@ -358,7 +559,7 @@ def plot_fit(t_full, y_full, yerr_full, series_index, C, xbest, rv_std = 1.0, ou
         
         if inject_planet == True:
             y_model[series_index[0]] -= (planet_injection(t_full[series_index[0]], xbest[10], xbest[11], xbest[12]))/rv_std
-       
+
         y_model[series_index[0]] -= xbest[8]
         y_model[series_index[1]] -= xbest[9]
         
@@ -371,21 +572,21 @@ def plot_fit(t_full, y_full, yerr_full, series_index, C, xbest, rv_std = 1.0, ou
 
         ax = axs[k]
         if k ==0 :
-            ax.errorbar(t_full[series_index[k]], y_model[series_index[k]], yerr_full[series_index[k]], fmt='.', color='k', label='Data')
+            ax.errorbar(t_full[series_index[k]], y_model[series_index[k]], yerr_full[series_index[k]], fmt='.', color='k', label='meas.')
             if inject_planet == True:
                 ax.plot(t_full[series_index[k]], planet_injection(t_full[series_index[k]], xbest[10], xbest[11], xbest[12])/rv_std, 'r', label='injected planet')
         if k == 1:
-            ax.errorbar(t_full[series_index[k]], y_model[series_index[k]], yerr_full[series_index[k]], fmt='.', color='k', label='Data')
+            ax.errorbar(t_full[series_index[k]], y_model[series_index[k]], yerr_full[series_index[k]], fmt='.', color='k', label='meas.')
         ax.fill_between(tsmooth,
             mu - np.sqrt(var),
             mu + np.sqrt(var),
             color='g',
             alpha=0.5)
-        ax.plot(tsmooth, mu, 'g', label='GP fit')
+        ax.plot(tsmooth, mu, 'g', label='predict.')
         if k == 0:
-            ax.set_ylabel("RV",fontsize=14)
+            ax.set_ylabel("RV")
         if k == 1:
-            ax.set_ylabel('RHK',fontsize=14)   
+            ax.set_ylabel('RHK')   
 
         if return_residuals==True:
             if k == 0:
@@ -393,8 +594,70 @@ def plot_fit(t_full, y_full, yerr_full, series_index, C, xbest, rv_std = 1.0, ou
             else:
                 res_rhk = y_model[series_index[k]] - mu_res
 
-    ax.set_xlabel('Time',fontsize=14)
-    axs[0].legend(fontsize=14)
+    ax.set_xlabel('$t$')
+    axs[0].legend()
+    plt.savefig(output_name)
+    if return_residuals==True:
+        return tsmooth, mus, res_rv, res_rhk
+    else:
+        return tsmooth, mus
+    
+
+def plot_fit_cyc(t_full, y_full, yerr_full, series_index, C, xbest, rv_std = 1.0, output_name = 'fit_plot.png', return_residuals=True, inject_planet=True):
+
+    tsmooth = np.linspace(np.min(t_full), np.max(t_full), 1000)
+    _, axs = plt.subplots(2, 1, sharex=True, figsize=(15, 10))
+
+    mus = []
+    vars = []
+
+    for k in range(2):
+        C.kernel['rot'].set_conditional_coef(series_id=k)
+
+        y_model = y_full.copy()
+        print("xbest:", xbest)
+        if inject_planet == True:
+            y_model[series_index[0]] -= (planet_injection(t_full[series_index[0]], xbest[15], xbest[16], xbest[17]))/rv_std
+
+        core0, _,_,_ = shared_core_and_grads(t_full[series_index[0]], xbest[8], xbest[9], xbest[10])
+        core1, _,_,_ = shared_core_and_grads(t_full[series_index[1]], xbest[8], xbest[9], xbest[10])
+        a0, a1 = xbest[11], xbest[12]
+        d0, d1 = xbest[13], xbest[14]
+        y_model[series_index[0]] -=  a0*core0 + d0
+        y_model[series_index[1]] -=  a1*core1 + d1
+                
+        mu, var = C.conditional(y_model, tsmooth, calc_cov='diag')
+        mu_res, _ = C.conditional(y_model, t_full[series_index[k]], calc_cov='diag')
+
+        mus.append(mu)
+        vars.append(var)
+
+        ax = axs[k]
+        if k ==0 :
+            ax.errorbar(t_full[series_index[k]], y_model[series_index[k]], yerr_full[series_index[k]], fmt='.', color='k', label='meas.')
+            if inject_planet == True:
+                ax.plot(t_full[series_index[k]], planet_injection(t_full[series_index[k]], xbest[15], xbest[16], xbest[17])/rv_std, 'r', label='injected planet')
+        if k == 1:
+            ax.errorbar(t_full[series_index[k]], y_model[series_index[k]], yerr_full[series_index[k]], fmt='.', color='k', label='meas.')
+        ax.fill_between(tsmooth,
+            mu - np.sqrt(var),
+            mu + np.sqrt(var),
+            color='g',
+            alpha=0.5)
+        ax.plot(tsmooth, mu, 'g', label='predict.')
+        if k == 0:
+            ax.set_ylabel("RV")
+        if k == 1:
+            ax.set_ylabel('RHK')   
+
+        if return_residuals==True:
+            if k == 0:
+                res_rv = y_model[series_index[k]] - mu_res
+            else:
+                res_rhk = y_model[series_index[k]] - mu_res
+
+    ax.set_xlabel('$t$')
+    axs[0].legend()
     plt.savefig(output_name)
     if return_residuals==True:
         return tsmooth, mus, res_rv, res_rhk
@@ -438,8 +701,7 @@ def plot_corner(sampler, C, discard = 1000, planet = True, output_name = 'corner
     # true_vals = [0.0, 0.0, prot, Q, stds[0], stds[1], stds[0], 8000, np.pi, 0.28, gamma_0, gamma_1, delta_0, delta_1, 100.0, 0.5, 0.5]
 
     fig = corner.corner(
-        flat_samples, labels=labels, show_titles=True, label_kwargs={"fontsize": 14},
-        title_kwargs={"fontsize": 12}
+        flat_samples, labels=labels, show_titles=True
     );
     plt.savefig(output_name)
 
