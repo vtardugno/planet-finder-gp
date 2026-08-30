@@ -882,6 +882,56 @@ def plot_fit_nonstat(t_full, y_full, yerr_full, series_index, C, xbest, rv_std =
     else:
         return tsmooth, mus
 
+
+def plot_kernel_draw(t_full, C, xbest, sig=1.0, n_points=2000, output_name='kernel_draw.png'):
+    """
+    Unconditional sample draw from the optimised rotation kernel alone
+    (SimpleProductKernel(NonStationaryKernel, MultiSeriesKernel(MEPKernel)),
+    negligible nugget instead of the fitted jitter/error), so the cycle's
+    amplitude modulation is visible without being masked by measurement noise.
+    """
+    params, _ = get_opt_params_nonstat(C)
+    idx_mu = params.index('rot.nonstat_mu')
+    idx_b = params.index('rot.nonstat_b')
+    idx_P = params.index('rot.nonstat_P')
+    idx_phi = params.index('rot.nonstat_phi')
+    idx_prot = params.index('rot.qp_P')
+    idx_rho = params.index('rot.qp_rho')
+    idx_eta = params.index('rot.qp_eta')
+    idx_alpha0 = params.index('rot.qp_alpha_0')
+    idx_alpha1 = params.index('rot.qp_alpha_1')
+    idx_beta0 = params.index('rot.qp_beta_0')
+
+    mu, b, P, phi = xbest[idx_mu], xbest[idx_b], xbest[idx_P], xbest[idx_phi]
+    prot, rho, eta = xbest[idx_prot], xbest[idx_rho], xbest[idx_eta]
+    alpha_0, alpha_1, beta_0 = xbest[idx_alpha0], xbest[idx_alpha1], xbest[idx_beta0]
+
+    tsmooth = np.linspace(np.min(t_full), np.max(t_full), n_points)
+    t_grid, yerr_grid, series_index_grid = cov.merge_series(
+        [tsmooth, tsmooth], [np.full(n_points, 1e-6), np.full(n_points, 1e-6)]
+    )
+
+    C_draw = cov.Cov(
+        t_grid,
+        err=term.Error(yerr_grid),
+        rot=term.SimpleProductKernel(
+            nonstat=NonStationaryKernel(alpha_cyc, alpha_cyc_grad, mu=mu, b=b, P=P, phi=phi),
+            qp=term.MultiSeriesKernel(term.MEPKernel(sig, prot, rho, eta), series_index_grid,
+                                       np.array([alpha_0, alpha_1]), np.array([beta_0, 0.0])),
+        ),
+    )
+    y_draw = C_draw.sample()
+
+    _, axs = plt.subplots(2, 1, sharex=True, figsize=(15, 8))
+    axs[0].plot(tsmooth, y_draw[series_index_grid[0]], color='C0')
+    axs[0].set_ylabel('RV draw')
+    axs[1].plot(tsmooth, y_draw[series_index_grid[1]], color='C1')
+    axs[1].set_ylabel('RHK draw')
+    axs[1].set_xlabel('$t$')
+    plt.tight_layout()
+    plt.savefig(output_name)
+
+
 def plot_chains(sampler, C, planet = True, output_name = 'chains_plot.png'):
     params , _ = get_opt_params(C)
     if planet == True:

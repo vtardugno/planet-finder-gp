@@ -256,6 +256,9 @@ def main():
 
         np.save("results_nonstat/xbest_" + args.output_name + ".npy", xbest_all)
 
+    kernel_draw_name = "results_nonstat/kernel_draw_" + args.output_name + ".png"
+    mf.plot_kernel_draw(t_full, C, xbest_all, sig=args.sig, output_name=kernel_draw_name)
+
     if args.run_mcmc:
 
         if args.fit_planet:
