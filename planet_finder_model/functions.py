@@ -203,7 +203,7 @@ def joint_model(x_concat,
 
     return np.concatenate([y1, y2])
 
-def fit_cycle(t_full, y_full, series_index, b0=0, P0=4000, phi0=0, print_results=False, plot=False, output_name='cycle_fit.png'):
+def fit_cycle(t_full, y_full, series_index, b0=0, P0=4000, phi0=0, print_results=False, plot=False, output_name='cycle_fit.png', return_fit=False):
     x = t_full[series_index[0]]  # same for both series, but just take from one
     x_concat = np.concatenate([t_full[series_index[0]], t_full[series_index[1]]])
     y_rv = y_full[series_index[0]]
@@ -282,6 +282,9 @@ def fit_cycle(t_full, y_full, series_index, b0=0, P0=4000, phi0=0, print_results
         # plt.legend()
         # # plt.show()
         # plt.savefig(f'rhk_{output_name}')
+
+    if return_fit == True:
+        return rv_fit, rhk_fit, params
 
     return rv_fit, rhk_fit
 
@@ -379,8 +382,8 @@ def negloglike_cyc(theta, t_full, y_full, series_index,C, rv_std = 1.0, inject_p
 
 
   if inject_planet == True:
-    argument = 2 * np.pi * t_full[series_index[0]] / (theta[10]+0.000001)
-    grad_planet_p = np.sum(dL_dy[series_index[0]] * (1/rv_std)*(-theta[11] * 2 * np.pi * t_full[series_index[0]] / ((theta[10]+0.000001)**2) * np.cos(argument)+theta[12]*2*np.pi*t_full[series_index[0]]/((theta[10]+0.000001)**2)*np.sin(argument))) 
+    argument = 2 * np.pi * t_full[series_index[0]] / (theta[15]+0.000001)
+    grad_planet_p = np.sum(dL_dy[series_index[0]] * (1/rv_std)*(-theta[16] * 2 * np.pi * t_full[series_index[0]] / ((theta[15]+0.000001)**2) * np.cos(argument)+theta[17]*2*np.pi*t_full[series_index[0]]/((theta[15]+0.000001)**2)*np.sin(argument)))
     grad_planet_a = np.sum(dL_dy[series_index[0]] * (1/rv_std)*(np.sin(argument)))
     grad_planet_b = np.sum(dL_dy[series_index[0]] * (1 / rv_std) * (np.cos(argument)))
     nll_grad = np.concatenate([np.asarray(base_grad).ravel(), np.array([grad_b, grad_P, grad_phi,grad_amp_0, grad_amp_1,grad_delta_0, grad_delta_1,grad_planet_p, grad_planet_a, grad_planet_b])])
@@ -452,12 +455,16 @@ def optimise_params(t_full, y_full, series_index, C, bounds_list, delta_0 = -0.0
     return xbest, C
 
 
-def optimise_params_cyc(t_full, y_full, series_index, C, bounds_list, b = 0.0, P = 4000, phi = 0.0, planet_p = 40.05, planet_A = 0.0005, planet_B = 0.0, fit_planet = True, change_C = True):
+def optimise_params_cyc(t_full, y_full, series_index, C, bounds_list, b = 0.0, P = 4000, phi = 0.0, a0 = None, a1 = None, d0 = None, d1 = None, planet_p = 40.05, planet_A = 0.0005, planet_B = 0.0, fit_planet = True, change_C = True):
 
-    a0 = np.mean(y_full[series_index[0]])
-    a1 = np.mean(y_full[series_index[1]])
-    d0 = np.std(y_full[series_index[0]])
-    d1 = np.std(y_full[series_index[1]])
+    if a0 is None:
+        a0 = np.std(y_full[series_index[0]])
+    if a1 is None:
+        a1 = np.std(y_full[series_index[1]])
+    if d0 is None:
+        d0 = np.mean(y_full[series_index[0]])
+    if d1 is None:
+        d1 = np.mean(y_full[series_index[1]])
 
     params, _ = get_opt_params(C)
 
@@ -539,6 +546,21 @@ def run_emcee(t_full, y_full, series_index, C, x0, bounds_list, run_length = 300
 
     sampler = emcee.EnsembleSampler(
     nwalkers, ndim, log_probability, args=(t_full, y_full, series_index, C, bounds_list, planet)
+    )
+    sampler.run_mcmc(pos, run_length, progress=True);
+    return sampler
+
+
+def run_emcee_cyc(t_full, y_full, series_index, C, x0, bounds_list, run_length = 3000, planet = True):
+
+    print(log_prior_cyc(x0, bounds_list, planet))
+
+    ndim = len(x0)
+    pos = x0 + 1e-5 * np.random.randn(ndim*3, ndim)
+    nwalkers, ndim = pos.shape
+
+    sampler = emcee.EnsembleSampler(
+    nwalkers, ndim, log_probability_cyc, args=(t_full, y_full, series_index, C, bounds_list, planet)
     )
     sampler.run_mcmc(pos, run_length, progress=True);
     return sampler
