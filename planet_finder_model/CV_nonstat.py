@@ -135,8 +135,8 @@ def build_bounds_list_cyc(args, stds):
         (args.phi_min, args.phi_max),
         (args.a0_min, args.a0_max),
         (args.a1_min, args.a1_max),
-        (args.delta0_min, args.delta0_max),
-        (args.delta1_min, args.delta1_max),
+        (-0.1, 1.0),   # delta0, matches main_cycle_likelihood.py's default
+        (-5.0, 5.0),   # delta1, matches main_cycle_likelihood.py's default
     ]
 
     if args.fit_planet:
@@ -270,8 +270,8 @@ def main():
                     )
 
         xbest, C = mf.optimise_params(t_full_train, y_full_train, series_index_train, C, bounds_list_nocyc,
-                                delta_0=args.delta_0,
-                                delta_1=args.delta_1,
+                                delta_0=np.mean(y_full_train[series_index_train[0]]),
+                                delta_1=np.mean(y_full_train[series_index_train[1]]),
                                 planet_p=planet_p_fold,
                                 planet_A=args.planet_A_fit,
                                 planet_B=args.planet_B_fit,
@@ -434,8 +434,8 @@ def main():
                 )
 
     xbest, C = mf.optimise_params(t_full, y_full, series_index, C, bounds_list_nocyc,
-                            delta_0=args.delta_0,
-                            delta_1=args.delta_1,
+                            delta_0=np.mean(y_full[series_index[0]]),
+                            delta_1=np.mean(y_full[series_index[1]]),
                             planet_p=args.planet_p,
                             planet_A=args.planet_A_fit,
                             planet_B=args.planet_B_fit,

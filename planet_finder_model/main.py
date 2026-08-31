@@ -94,19 +94,31 @@ def build_bounds_list(args, stds):
     alpha_1_max = args.alpha1_max_frac * stds[1]
     beta_0_max = args.beta0_max_frac * stds[0]
 
+    if args.fit_cycle:
+        rho_max = args.rho_max
+        eta_max = args.eta_max
+        delta1_min, delta1_max = args.delta1_min, args.delta1_max
+    else:
+        # No cycle term to absorb long-period variability, so rho/eta need
+        # more room to explore than the standard (post-cycle-subtraction)
+        # bounds, matching CV_nonstat.py's no_cycle bounds.
+        rho_max = 100.0
+        eta_max = 3.0
+        delta1_min, delta1_max = -5.0, 5.0
+
     if args.fit_planet:
 
         return [
             (0.0, rvjit_max),
             (0.0, rhkjit_max),
             (args.prot_min, args.prot_max),
-            (args.rho_min, args.rho_max),
-            (args.eta_min, args.eta_max),
+            (args.rho_min, rho_max),
+            (args.eta_min, eta_max),
             (0.0, alpha_0_max),
             (-alpha_1_max, alpha_1_max),
             (-beta_0_max, beta_0_max),
             (args.delta0_min, args.delta0_max),
-            (args.delta1_min, args.delta1_max),
+            (delta1_min, delta1_max),
             (args.planet_p_min, args.planet_p_max),
             (args.planet_A_min, args.planet_A_max),
             (args.planet_B_min, args.planet_B_max),
@@ -116,13 +128,13 @@ def build_bounds_list(args, stds):
             (0.0, rvjit_max),
             (0.0, rhkjit_max),
             (args.prot_min, args.prot_max),
-            (args.rho_min, args.rho_max),
-            (args.eta_min, args.eta_max),
+            (args.rho_min, rho_max),
+            (args.eta_min, eta_max),
             (0.0, alpha_0_max),
             (-alpha_1_max, alpha_1_max),
             (-beta_0_max, beta_0_max),
             (args.delta0_min, args.delta0_max),
-            (args.delta1_min, args.delta1_max),
+            (delta1_min, delta1_max),
         ]
 
 def main():
@@ -167,6 +179,13 @@ def main():
 
     stds = [np.std(y_full[series_index[0]]), np.std(y_full[series_index[1]])]
 
+    if args.fit_cycle:
+        delta_0_init = args.delta_0
+        delta_1_init = args.delta_1
+    else:
+        delta_0_init = np.mean(y_full[series_index[0]])
+        delta_1_init = np.mean(y_full[series_index[1]])
+
     bounds_list = build_bounds_list(args, stds)
 
     if args.fit_planet:
@@ -205,9 +224,9 @@ def main():
                         ),
                     )
 
-                    xbest, C = mf.optimise_params(t_full, y_full, series_index, C, bounds_list, 
-                                                delta_0=args.delta_0,
-                                                delta_1=args.delta_1,
+                    xbest, C = mf.optimise_params(t_full, y_full, series_index, C, bounds_list,
+                                                delta_0=delta_0_init,
+                                                delta_1=delta_1_init,
                                                 planet_p=p,
                                                 planet_A=A,
                                                 planet_B=B,
@@ -240,9 +259,9 @@ def main():
                         ),
                     )
 
-        xbest_all, C = mf.optimise_params(t_full, y_full, series_index, C, bounds_list, 
-                                                delta_0=args.delta_0,
-                                                delta_1=args.delta_1,
+        xbest_all, C = mf.optimise_params(t_full, y_full, series_index, C, bounds_list,
+                                                delta_0=delta_0_init,
+                                                delta_1=delta_1_init,
                                                 fit_planet=args.fit_planet,
                                                 change_C=args.change_C)
         
@@ -280,7 +299,7 @@ def main():
         # mf.plot_chains(sampler, C, planet=args.fit_planet, output_name=chains_plot_name)
 
         corner_plot_name = "results_nocyc/corner_plot_" + args.output_name + ".png"
-        mf.plot_corner(sampler, C, discard=args.corner_discard,planet=args.fit_planet,output_name=corner_plot_name)
+        mf.plot_corner(sampler, C, discard=args.corner_discard,planet=args.fit_planet,cycle=False,output_name=corner_plot_name)
 
         map_params, _ = mf.get_MAP_params(sampler, args.map_burn, args.map_thin)
         np.save("results_nocyc/map_params_" + args.output_name + ".npy", map_params)
