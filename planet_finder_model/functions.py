@@ -711,14 +711,20 @@ def plot_chains(sampler, C, planet = True, output_name = 'chains_plot.png'):
     plt.savefig(output_name)
 
 
-def plot_corner(sampler, C, discard = 1000, planet = True, output_name = 'corner_plot.png'):
+def plot_corner(sampler, C, discard = 1000, planet = True, cycle = True, output_name = 'corner_plot.png'):
 
     flat_samples = sampler.get_chain(discard=discard, thin=1, flat=True)
     params, _ = get_opt_params(C)
-    if planet == True:
-        labels = params + ['b', 'P', 'phi', 'a0', 'a1', 'delta_0', 'delta_1', 'planet_p', 'planet_A', 'planet_B']
+    if cycle == True:
+        if planet == True:
+            labels = params + ['b', 'P', 'phi', 'a0', 'a1', 'delta_0', 'delta_1', 'planet_p', 'planet_A', 'planet_B']
+        else:
+            labels = params + ['b', 'P', 'phi', 'a0', 'a1', 'delta_0', 'delta_1']
     else:
-        labels = params + ['b', 'P', 'phi', 'a0', 'a1', 'delta_0', 'delta_1']
+        if planet == True:
+            labels = params + ['delta_0', 'delta_1', 'planet_p', 'planet_A', 'planet_B']
+        else:
+            labels = params + ['delta_0', 'delta_1']
 
     # true_vals = [0.0, 0.0, prot, Q, stds[0], stds[1], stds[0], 8000, np.pi, 0.28, gamma_0, gamma_1, delta_0, delta_1, 100.0, 0.5, 0.5]
 
