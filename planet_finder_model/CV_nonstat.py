@@ -23,7 +23,7 @@ def build_parser():
     )
 
     # Data loading
-    parser.add_argument("--path", default="Solar Data", help="Directory containing Analyse_summary.csv and Analyse_ccf.p")
+    parser.add_argument("--path", default="data/Solar_Data", help="Directory containing Analyse_summary.csv and Analyse_ccf.p")
     parser.add_argument("--star-name", default="Sun", help="Star name key used inside Analyse_ccf.p")
     parser.add_argument("--normalise", action=argparse.BooleanOptionalAction, default=False, help="Normalise RV and RHK")
     parser.add_argument("--inject-planet", action=argparse.BooleanOptionalAction, default=False, help="Inject a synthetic planet signal into RV")
@@ -95,23 +95,26 @@ def build_parser():
 
     return parser
 
-def build_bounds_list(args, stds):
+def build_bounds_list_nocyc(args, stds):
     rvjit_max = args.rvjit_max_frac * stds[0]
     rhkjit_max = args.rhkjit_max_frac * stds[1]
     alpha_0_max = args.alpha0_max_frac * stds[0]
     alpha_1_max = args.alpha1_max_frac * stds[1]
     beta_0_max = args.beta0_max_frac * stds[0]
+    # No cycle term to absorb long-period variability, so rho/eta/delta1 need
+    # more room than the cyc/nonstat bounds -- matches main.py's --no-fit-cycle
+    # widening and injection_recovery_nocycle.py's no_cycle bounds.
     return [
         (0.0, rvjit_max),
         (0.0, rhkjit_max),
         (args.prot_min, args.prot_max),
-        (args.rho_min, args.rho_max),
-        (args.eta_min, args.eta_max),
+        (args.rho_min, 100.0),
+        (args.eta_min, 3.0),
         (0.0, alpha_0_max),
         (-alpha_1_max, alpha_1_max),
         (-beta_0_max, beta_0_max),
         (args.delta0_min, args.delta0_max),
-        (args.delta1_min, args.delta1_max),
+        (-5.0, 5.0),
     ]
 
 def build_bounds_list_cyc(args, stds):
@@ -237,17 +240,7 @@ def main():
         t_full_test, y_full_test, yerr_full_test, series_index_test = cov.merge_series(t_test, y_test, yerr_test)
 
         stds = [np.std(y_full_train[series_index_train[0]]), np.std(y_full_train[series_index_train[1]])]
-        bounds_list_nocyc = [(0.0, args.rvjit_max_frac * stds[0]),
-        (0.0, args.rhkjit_max_frac * stds[1]),
-        (args.prot_min, args.prot_max),
-        (args.rho_min, 100.0),
-        (args.eta_min, 3.0),
-        (0.0, args.alpha0_max_frac * stds[0]),
-        (-args.alpha1_max_frac * stds[1], args.alpha1_max_frac * stds[1]),
-        (-args.beta0_max_frac * stds[0], args.beta0_max_frac * stds[0]),
-        (args.delta0_min, args.delta0_max),
-        (-5.0, 5.0),
-        ]
+        bounds_list_nocyc = build_bounds_list_nocyc(args, stds)
         bounds_list_cyc = build_bounds_list_cyc(args, stds)
         bounds_list_nonstat = build_bounds_list_nonstat(args, stds)
 
@@ -421,7 +414,7 @@ def main():
 
     # NO CYCLE
 
-    bounds_list_nocyc = build_bounds_list(args, stds)
+    bounds_list_nocyc = build_bounds_list_nocyc(args, stds)
     C = cov.Cov(
                 t_full,
                 err=term.Error(yerr_full),
