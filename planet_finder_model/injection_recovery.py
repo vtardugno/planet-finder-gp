@@ -116,9 +116,14 @@ def build_parser():
     parser.add_argument("--delta1-min", type=float, default=-5)
     parser.add_argument("--delta1-max", type=float, default=5)
 
-    # nonstat-only bound
+    # nonstat-only bounds (main_nonstat.py uses its own delta0/delta1 bounds,
+    # different from main_cycle_likelihood.py's above)
     parser.add_argument("--mu-min", type=float, default=-5.0)
     parser.add_argument("--mu-max", type=float, default=5.0)
+    parser.add_argument("--nonstat-delta0-min", type=float, default=-0.5)
+    parser.add_argument("--nonstat-delta0-max", type=float, default=0.5)
+    parser.add_argument("--nonstat-delta1-min", type=float, default=-2.0)
+    parser.add_argument("--nonstat-delta1-max", type=float, default=2.0)
 
     # Planet amplitude fit bound: since injected phase spans the full circle,
     # A_inj/B_inj can be negative, so the fit bound must be symmetric
@@ -198,8 +203,8 @@ def build_bounds_list_nonstat(args, stds, period_bounds, amp_bound):
         (-beta_0_max, beta_0_max),
         (args.a0_min, args.a0_max),
         (args.a1_min, args.a1_max),
-        (args.delta0_min, args.delta0_max),
-        (args.delta1_min, args.delta1_max),
+        (args.nonstat_delta0_min, args.nonstat_delta0_max),
+        (args.nonstat_delta1_min, args.nonstat_delta1_max),
         period_bounds,
         (-amp_bound, amp_bound),
         (-amp_bound, amp_bound),
