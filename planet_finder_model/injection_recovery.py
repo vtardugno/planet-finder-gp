@@ -1,13 +1,18 @@
-"""Injection-recovery grid sweep comparing the cyc and nonstat models.
+"""Injection-recovery grid sweep comparing the cyc, nonstat, and no_cycle models.
 
 For each (period, semi-amplitude K, orbital phase) combination on a log-spaced
-grid, injects a synthetic planet into the Solar RV data and fits it with both
-the cyc model (functions.py) and the nonstat model
-(nonstationary/functions_nonstat.py), using the same blind
-periodogram + multi-start L-BFGS-B search each existing single-injection
-script (main_cycle_likelihood.py / nonstationary/main_nonstat.py) already
-uses. Results are appended to a CSV as they complete, so the sweep can be
-interrupted and resumed by simply re-running the same command.
+grid, injects a synthetic planet into the Solar RV data and fits it with
+whichever of the three models --models selects: cyc (functions.py),
+nonstat (nonstationary/functions_nonstat.py), and no_cycle (functions.py's
+bare-GP branch), using the same blind periodogram + multi-start L-BFGS-B
+search each existing single-injection script (main_cycle_likelihood.py /
+nonstationary/main_nonstat.py / main.py --no-fit-cycle) already uses.
+Results are appended to a CSV as they complete, so the sweep can be
+interrupted and resumed by simply re-running the same command. Resumability
+is tracked per (combo, mode): re-running with a different --models against
+an existing --output-csv only computes whichever modes are still missing for
+each combo, so e.g. adding no_cycle to a CSV that already has cyc/nonstat
+never recomputes those.
 """
 
 import os
@@ -57,12 +62,14 @@ CSV_FIELDS = [
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="Injection-recovery grid sweep comparing the cyc and nonstat models."
+        description="Injection-recovery grid sweep comparing the cyc, nonstat, and no_cycle models."
     )
 
     parser.add_argument("--path", default="data/Solar_Data")
     parser.add_argument("--star-name", default="Sun")
     parser.add_argument("--normalise", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--models", type=str, default="cyc,nonstat,no_cycle",
+                         help="Comma-separated subset of cyc,nonstat,no_cycle to fit per combo.")
 
     # Grid
     parser.add_argument("--n-period", type=int, default=10)
@@ -124,6 +131,17 @@ def build_parser():
     parser.add_argument("--nonstat-delta0-max", type=float, default=0.5)
     parser.add_argument("--nonstat-delta1-min", type=float, default=-2.0)
     parser.add_argument("--nonstat-delta1-max", type=float, default=2.0)
+
+    # no_cycle-only bounds (main.py --no-fit-cycle widens rho/eta -- no cycle
+    # term to absorb long-period variability, so the GP's own rho/eta need
+    # more room -- and uses its own delta0/delta1 bounds; rho_min/eta_min and
+    # everything else above stay shared with cyc/nonstat)
+    parser.add_argument("--nocyc-rho-max", type=float, default=100.0)
+    parser.add_argument("--nocyc-eta-max", type=float, default=3.0)
+    parser.add_argument("--nocyc-delta0-min", type=float, default=-0.5)
+    parser.add_argument("--nocyc-delta0-max", type=float, default=0.5)
+    parser.add_argument("--nocyc-delta1-min", type=float, default=-5.0)
+    parser.add_argument("--nocyc-delta1-max", type=float, default=5.0)
 
     # Planet amplitude fit bound: since injected phase spans the full circle,
     # A_inj/B_inj can be negative, so the fit bound must be symmetric
@@ -211,6 +229,30 @@ def build_bounds_list_nonstat(args, stds, period_bounds, amp_bound):
     ]
 
 
+def build_bounds_list_nocyc(args, stds, period_bounds, amp_bound):
+    rvjit_max = args.rvjit_max_frac * stds[0]
+    rhkjit_max = args.rhkjit_max_frac * stds[1]
+    alpha_0_max = args.alpha0_max_frac * stds[0]
+    alpha_1_max = args.alpha1_max_frac * stds[1]
+    beta_0_max = args.beta0_max_frac * stds[0]
+
+    return [
+        (0.0, rvjit_max),
+        (0.0, rhkjit_max),
+        (args.prot_min, args.prot_max),
+        (args.rho_min, args.nocyc_rho_max),
+        (args.eta_min, args.nocyc_eta_max),
+        (0.0, alpha_0_max),
+        (-alpha_1_max, alpha_1_max),
+        (-beta_0_max, beta_0_max),
+        (args.nocyc_delta0_min, args.nocyc_delta0_max),
+        (args.nocyc_delta1_min, args.nocyc_delta1_max),
+        period_bounds,
+        (-amp_bound, amp_bound),
+        (-amp_bound, amp_bound),
+    ]
+
+
 def fit_cyc(t_full, y_full, yerr_full, series_index, stds, args, planet_guess, cycle_seed, amp_bound, rv_std):
     rv_offset0, rv_amp0, rhk_offset0, rhk_amp0, b0, P0, phi0 = cycle_seed
 
@@ -291,6 +333,42 @@ def fit_nonstat(t_full, y_full, yerr_full, series_index, stds, args, planet_gues
     return xbest_all, best_loglike
 
 
+def fit_nocyc(t_full, y_full, yerr_full, series_index, stds, args, planet_guess, rv_offset0, rhk_offset0, amp_bound, rv_std):
+    best_loglike = -np.inf
+    xbest_all = None
+
+    for p in planet_guess:
+        period_bounds = (max(p - 10, 1.1), min(p + 10, args.period_max))
+        bounds_list = build_bounds_list_nocyc(args, stds, period_bounds, amp_bound)
+
+        for Afrac in A_INIT_FRACS:
+            for Bfrac in B_INIT_FRACS:
+                C = cov.Cov(
+                    t_full,
+                    err=term.Error(yerr_full),
+                    rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
+                    rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
+                    rot=MultiSeriesKernel(term.MEPKernel(args.sig, args.prot, args.rho, args.eta), series_index,
+                                          np.array([stds[0], stds[1]]),
+                                          np.array([stds[0], 0.0])),
+                )
+
+                xbest, C = mf.optimise_params(
+                    t_full, y_full, series_index, C, bounds_list,
+                    delta_0=rv_offset0, delta_1=rhk_offset0,
+                    planet_p=p, planet_A=args.planet_A_fit * Afrac, planet_B=args.planet_B_fit * Bfrac,
+                    fit_planet=True, change_C=True,
+                )
+
+                loglike = -1 * mf.negloglike_nocyc(xbest, t_full, y_full, series_index, C, rv_std, inject_planet=True)[0]
+
+                if loglike > best_loglike:
+                    best_loglike = loglike
+                    xbest_all = xbest
+
+    return xbest_all, best_loglike
+
+
 def make_row(period_idx, k_idx, phase_idx, period_inj, k_inj, phase_inj, A_inj, B_inj, mode, xbest, loglike):
     if xbest is None:
         return {
@@ -316,7 +394,7 @@ def make_row(period_idx, k_idx, phase_idx, period_inj, k_inj, phase_inj, A_inj, 
     }
 
 
-def run_one_combo(args_dict, period_idx, k_idx, phase_idx, period, k, seed):
+def run_one_combo(args_dict, period_idx, k_idx, phase_idx, period, k, seed, modes_needed):
     args = argparse.Namespace(**args_dict)
 
     rng = np.random.default_rng(seed)
@@ -337,21 +415,38 @@ def run_one_combo(args_dict, period_idx, k_idx, phase_idx, period, k, seed):
     stds = [np.std(y_full[series_index[0]]), np.std(y_full[series_index[1]])]
     amp_bound = args.planet_amp_max if args.planet_amp_max is not None else 1.5 * args.k_max
 
-    _, _, cycle_params = mf.fit_cycle(
-        t_full, y_full, series_index,
-        b0=args.cycle_b0, P0=args.cycle_P0, phi0=args.cycle_phi0,
-        plot=False, print_results=False, return_fit=True,
-    )
+    # cyc/nonstat share the cycle-fit warm start; no_cycle never fits a cycle
+    # at all (matches main.py --no-fit-cycle) and warm-starts its additive
+    # offsets from the raw data means instead.
+    cycle_params = None
+    if "cyc" in modes_needed or "nonstat" in modes_needed:
+        _, _, cycle_params = mf.fit_cycle(
+            t_full, y_full, series_index,
+            b0=args.cycle_b0, P0=args.cycle_P0, phi0=args.cycle_phi0,
+            plot=False, print_results=False, return_fit=True,
+        )
+
     planet_guess, _ = mf.period_guess(
         t_full, y_full, yerr_full, series_index,
         PMIN=1.1, PMAX=args.period_max, MAX_FAP=1e-5, MAX_NPL=2, plot=False,
     )
 
     rows = []
-    for mode, fit_fn in (("cyc", fit_cyc), ("nonstat", fit_nonstat)):
+    for mode in modes_needed:
         try:
-            xbest, loglike = fit_fn(t_full, y_full, yerr_full, series_index, stds, args,
-                                     planet_guess, cycle_params, amp_bound, rv_std)
+            if mode == "cyc":
+                xbest, loglike = fit_cyc(t_full, y_full, yerr_full, series_index, stds, args,
+                                          planet_guess, cycle_params, amp_bound, rv_std)
+            elif mode == "nonstat":
+                xbest, loglike = fit_nonstat(t_full, y_full, yerr_full, series_index, stds, args,
+                                              planet_guess, cycle_params, amp_bound, rv_std)
+            elif mode == "no_cycle":
+                rv_offset0 = float(np.mean(y_full[series_index[0]]))
+                rhk_offset0 = float(np.mean(y_full[series_index[1]]))
+                xbest, loglike = fit_nocyc(t_full, y_full, yerr_full, series_index, stds, args,
+                                            planet_guess, rv_offset0, rhk_offset0, amp_bound, rv_std)
+            else:
+                raise ValueError(f"unknown mode {mode!r}")
         except Exception as exc:
             print(f"[combo p_idx={period_idx} k_idx={k_idx} phase_idx={phase_idx} mode={mode}] "
                   f"failed: {exc}", flush=True)
@@ -381,8 +476,9 @@ def build_grid(args):
 
 
 def load_completed_combos(csv_path):
+    """Returns {(period_idx, k_idx, phase_idx): {modes already present}}."""
     if not os.path.exists(csv_path):
-        return set()
+        return {}
 
     modes_by_combo = {}
     with open(csv_path, newline="") as f:
@@ -390,7 +486,7 @@ def load_completed_combos(csv_path):
             key = (int(row["period_idx"]), int(row["k_idx"]), int(row["phase_idx"]))
             modes_by_combo.setdefault(key, set()).add(row["mode"])
 
-    return {key for key, modes in modes_by_combo.items() if {"cyc", "nonstat"} <= modes}
+    return modes_by_combo
 
 
 def main():
@@ -403,6 +499,11 @@ def main():
     if args.force_fresh and os.path.exists(args.output_csv):
         os.remove(args.output_csv)
 
+    requested_models = set(m.strip() for m in args.models.split(","))
+    unknown = requested_models - {"cyc", "nonstat", "no_cycle"}
+    if unknown:
+        raise SystemExit(f"--models: unknown model(s) {sorted(unknown)}; choose from cyc,nonstat,no_cycle")
+
     periods, ks = build_grid(args)
 
     all_combos = [
@@ -412,9 +513,16 @@ def main():
         for phi in range(args.n_phases)
     ]
     completed = load_completed_combos(args.output_csv)
-    remaining = [c for c in all_combos if c not in completed]
 
-    print(f"{len(all_combos)} total combos, {len(completed)} already done, {len(remaining)} remaining.", flush=True)
+    remaining = []
+    for c in all_combos:
+        modes_needed = requested_models - completed.get(c, set())
+        if modes_needed:
+            remaining.append((c, modes_needed))
+
+    n_fully_done = len(all_combos) - len(remaining)
+    print(f"{len(all_combos)} total combos, {n_fully_done} already fully done, "
+          f"{len(remaining)} with outstanding modes.", flush=True)
 
     if not remaining:
         print("Nothing to do.")
@@ -422,8 +530,9 @@ def main():
 
     args_dict = vars(args)
     tasks = [
-        (args_dict, pi, ki, phi, float(periods[pi]), float(ks[ki]), args.seed + pi * 1000 + ki * 10 + phi)
-        for (pi, ki, phi) in remaining
+        (args_dict, pi, ki, phi, float(periods[pi]), float(ks[ki]),
+         args.seed + pi * 1000 + ki * 10 + phi, modes_needed)
+        for ((pi, ki, phi), modes_needed) in remaining
     ]
 
     n_workers = args.n_workers or max(1, min(9, (os.cpu_count() or 2) - 1))
