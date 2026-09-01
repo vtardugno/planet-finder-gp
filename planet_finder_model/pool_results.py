@@ -68,6 +68,8 @@ def main():
     df = pd.concat([pd.read_csv(p) for p in paths], ignore_index=True)
     n_rows_in = len(df)
 
+    df = df.drop_duplicates(subset=["mode", "period_inj", "k_inj", "phase_inj"], keep="first").reset_index(drop=True)
+
     df["period_inj"] = cluster_values(df["period_inj"].to_numpy(dtype=float), args.rel_tol)
     df["k_inj"] = cluster_values(df["k_inj"].to_numpy(dtype=float), args.rel_tol)
 
