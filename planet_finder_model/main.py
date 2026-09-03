@@ -18,7 +18,7 @@ def build_parser():
     )
 
     # Data loading
-    parser.add_argument("--path", default="Solar Data", help="Directory containing Analyse_summary.csv and Analyse_ccf.p")
+    parser.add_argument("--path", default="data/Solar_Data", help="Directory containing Analyse_summary.csv and Analyse_ccf.p")
     parser.add_argument("--star-name", default="Sun", help="Star name key used inside Analyse_ccf.p")
     parser.add_argument("--normalise", action=argparse.BooleanOptionalAction, default=False, help="Normalise RV and RHK")
     parser.add_argument("--inject-planet", action=argparse.BooleanOptionalAction, default=True, help="Inject a synthetic planet signal into RV")
