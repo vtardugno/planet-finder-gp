@@ -5,3 +5,4 @@ __pycache__/
 *.png
 *.npy
 *.csv
+*.json
