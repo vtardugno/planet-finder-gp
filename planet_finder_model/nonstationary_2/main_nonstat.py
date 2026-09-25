@@ -30,7 +30,7 @@ def build_parser():
     parser.add_argument("--cycle-b0", type=float, default=0.0, help="Initial shared linear coefficient")
     parser.add_argument("--cycle-P0", type=float, default=4000.0, help="Initial cycle period")
     parser.add_argument("--cycle-phi0", type=float, default=0.0, help="Initial cycle phase")
-    parser.add_argument("--cycle-c0", type=float, default=None, help="Initial core offset c (default: derived so the warm-start core's minimum sits just above 0)")
+    parser.add_argument("--cycle-c0", type=float, default=None, help="Initial core offset c (default: derived so the warm-start core's minimum sits 1.0 above 0)")
 
     # Model / covariance settings
     parser.add_argument("--sig", type=float, default=1.0, help="MEPKernel sigma")
@@ -170,10 +170,11 @@ def main():
     b0 = np.clip(b0, bounds_list[2][0], bounds_list[2][1])
     P0 = np.clip(P0, bounds_list[3][0], bounds_list[3][1])
 
-    # c0 puts the core's minimum just above 0; then map fit_cycle's
+    # c0 puts the core's minimum 1.0 above 0 (a margin of 0.1 stalls the
+    # optimiser at c=0; 1.0 converges from one run); then map fit_cycle's
     # offset + amp*(b t + sin) onto d + a*(b t + sin + c)/N exactly
     if args.cycle_c0 is None:
-        c0 = -np.min(b0 * t_full + np.sin(2 * np.pi * t_full / P0 + phi0)) + 0.1
+        c0 = -np.min(b0 * t_full + np.sin(2 * np.pi * t_full / P0 + phi0)) + 1.0
     else:
         c0 = args.cycle_c0
     N0 = 1 + c0 + np.abs(b0) * T
