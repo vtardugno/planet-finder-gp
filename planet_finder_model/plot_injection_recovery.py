@@ -46,7 +46,7 @@ def load_tcrit_modes(tcrit_path):
 
 def write_summary_table(df, tcrit_data, output_path):
     rows = []
-    for mode in ("cyc", "nonstat", "no_cycle"):
+    for mode in ("cyc", "nonstat", "nonstat2", "no_cycle"):
         if mode not in df["mode"].unique():
             continue
         sub = df[df["mode"] == mode]
@@ -141,8 +141,8 @@ def main():
     else:
         k_edges = bin_edges(df["k_inj_ms"].to_numpy(), args.n_k_bins)
 
-    mode_titles = {"cyc": "cyc", "nonstat": "nonstat", "no_cycle": "no cycle"}
-    present_modes = [m for m in ("cyc", "nonstat", "no_cycle") if m in df["mode"].unique()]
+    mode_titles = {"cyc": "cyc", "nonstat": "nonstat", "nonstat2": "nonstat2", "no_cycle": "no cycle"}
+    present_modes = [m for m in ("cyc", "nonstat", "nonstat2", "no_cycle") if m in df["mode"].unique()]
 
     tcrit_data = load_tcrit_modes(args.tcrit_path)
 
