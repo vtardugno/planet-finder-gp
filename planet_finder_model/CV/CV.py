@@ -1,3 +1,8 @@
+import sys
+import os
+# functions.py and the nonstationary* model dirs live in the parent folder
+_PARENT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _PARENT)
 import functions as mf
 import matplotlib.pyplot as plt
 import numpy as np
@@ -74,7 +79,7 @@ def build_parser():
     parser.add_argument("--planet-B-fit", type=float, default=0.01, help="Initial planet phi")
     parser.add_argument("--fit-planet", action=argparse.BooleanOptionalAction, default=False, help="Include planet parameters in the optimisation")
     parser.add_argument("--change-C", action=argparse.BooleanOptionalAction, default=True, help="Write the optimised kernel parameters back into C")
-    parser.add_argument("--output-csv", default="results/cv_results.csv", help="Where to save per-fold CV results")
+    parser.add_argument("--output-csv", default="CV/cv_results.csv", help="Where to save per-fold CV results")
     # Outputs
     # parser.add_argument("--fit-output", default="fit_plot.png", help="Output name for the fit plot")
     # parser.add_argument("--chains-output", default="chains_plot.png", help="Output name for the chains plot")
@@ -207,12 +212,12 @@ def main():
         loglike_total_nocyc = loglike_total_nocyc + test_loglike_nocyc
         print(f"fold {fold:02d} [no_cycle]: test loglike={test_loglike_nocyc:.6f}")
         cv_rows.append({"fold": fold, "mode": "no_cycle", "test_loglike": test_loglike_nocyc, "planet_p": planet_p_fold})
-        fit_plot_name_optim = f"results/optim_fit_plot_False_{fold}.png"
+        fit_plot_name_optim = f"CV/optim_fit_plot_False_{fold}.png"
         mf.plot_fit(t_full_train, y_full_train, yerr_full_train, series_index_train, C, xbest, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
 
         # CYCLE PART
 
-        cycle_out_name = f"results/cycle_fit_{fold}.png"
+        cycle_out_name = f"CV/cycle_fit_{fold}.png"
         rv_fit, rhk_fit, params = mf.fit_cycle(t_full_train, y_full_train, series_index_train, b0=args.cycle_b0, P0=args.cycle_P0, phi0=args.cycle_phi0, plot=args.cycle_plot, print_results=args.cycle_print_results, output_name=cycle_out_name, return_fit=True)
         y_full_train[series_index_train[0]] = y_full_train[series_index_train[0]] - rv_fit
         y_full_train[series_index_train[1]] = y_full_train[series_index_train[1]] - rhk_fit
@@ -260,7 +265,7 @@ def main():
         print(f"fold {fold:02d} [cycle]: test loglike={test_loglike_cyc:.6f}")
         cv_rows.append({"fold": fold, "mode": "cycle", "test_loglike": test_loglike_cyc, "planet_p": planet_p_fold})
 
-        fit_plot_name_optim = f"results/optim_fit_plot_True_{fold}.png"
+        fit_plot_name_optim = f"CV/optim_fit_plot_True_{fold}.png"
         mf.plot_fit(t_full_train, y_full_train, yerr_full_train, series_index_train, C, xbest, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
 
         # np.save("results/xbest_" + args.output_name + ".npy", xbest_all)
