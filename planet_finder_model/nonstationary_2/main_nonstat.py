@@ -63,9 +63,9 @@ def build_parser():
     parser.add_argument("--a1-max-frac", type=float, default=10.0)
     parser.add_argument("--planet-p-min", type=float, default=None)
     parser.add_argument("--planet-p-max", type=float, default=None)
-    parser.add_argument("--planet-A-min", type=float, default=0.000001)
+    parser.add_argument("--planet-A-min", type=float, default=-0.1)
     parser.add_argument("--planet-A-max", type=float, default=0.1)
-    parser.add_argument("--planet-B-min", type=float, default=0.000001)
+    parser.add_argument("--planet-B-min", type=float, default=-0.1)
     parser.add_argument("--planet-B-max", type=float, default=0.1)
     parser.add_argument("--delta0-max-frac", type=float, default=10.0)
     parser.add_argument("--delta1-max-frac", type=float, default=10.0)
@@ -73,8 +73,6 @@ def build_parser():
     # Optimisation / MCMC
     parser.add_argument("--run-mcmc", action=argparse.BooleanOptionalAction, default=False, help="Run MCMC after optimisation")
     parser.add_argument("--planet-p", type=float, default=None, help="Initial planet period")
-    parser.add_argument("--planet-A-fit", type=float, default=0.01, help="Initial planet A")
-    parser.add_argument("--planet-B-fit", type=float, default=0.01, help="Initial planet B")
     parser.add_argument("--fit-planet", action=argparse.BooleanOptionalAction, default=True, help="Include planet parameters in the optimisation")
     parser.add_argument("--change-C", action=argparse.BooleanOptionalAction, default=True, help="Write the optimised kernel parameters back into C")
     parser.add_argument("--run-length", type=int, default=3000, help="Number of MCMC steps")
@@ -188,8 +186,6 @@ def main():
     qp_beta0 = np.array([stds[0], 0.0]) / core_rms0
 
     if args.fit_planet:
-        A_inits = [args.planet_A_fit, args.planet_A_fit/10, args.planet_A_fit/100, args.planet_A_fit/1000]
-        B_inits = [args.planet_B_fit, args.planet_B_fit/10, args.planet_B_fit/100, args.planet_B_fit/1000]
         best_loglike = -np.inf
         xbest_all = []
         best_p_init = 0
@@ -209,40 +205,46 @@ def main():
 
             bounds_list[-3] = (np.max([p - 10, 1.1]), np.min([p + 10, 400.0]))
 
-            for A in A_inits:
-                for B in B_inits:
-
-                    C = cov.Cov(
-                    t_full,
-                    err=term.Error(yerr_full),
-                    rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
-                    rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
-                    rot = term.SimpleProductKernel(
-                            nonstat=mf.make_nonstat_kernel(T, b0, P0, phi0, c0),
-                            qp=MultiSeriesKernel(term.MEPKernel(args.sig,args.prot,args.rho,args.eta), series_index,
-                                    qp_amps0,
-                                    qp_beta0
-                                ),
+            C = cov.Cov(
+            t_full,
+            err=term.Error(yerr_full),
+            rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
+            rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
+            rot = term.SimpleProductKernel(
+                    nonstat=mf.make_nonstat_kernel(T, b0, P0, phi0, c0),
+                    qp=MultiSeriesKernel(term.MEPKernel(args.sig,args.prot,args.rho,args.eta), series_index,
+                            qp_amps0,
+                            qp_beta0
                         ),
-                    )
+                ),
+            )
 
-                    xbest, C = mf.optimise_params_nonstat(t_full, y_full, series_index, C, bounds_list,
-                                                a0=rv_amp0,
-                                                a1=rhk_amp0,
-                                                d0=rv_offset0,
-                                                d1=rhk_offset0,
-                                                planet_p=p,
-                                                planet_A=A,
-                                                planet_B=B,
-                                                fit_planet=args.fit_planet,
-                                                change_C=args.change_C)
+            # One start per period guess: planet A/B start at their generalised
+            # least-squares values given the starting GP and cycle mean
+            resid = y_full.copy()
+            resid[series_index[0]] -= rv_amp0 * mf.shared_core_pos(t_full[series_index[0]], b0, P0, phi0, c0, T) + rv_offset0
+            resid[series_index[1]] -= rhk_amp0 * mf.shared_core_pos(t_full[series_index[1]], b0, P0, phi0, c0, T) + rhk_offset0
+            A, B = mf.gls_planet_amplitudes(C, t_full, resid, series_index, p, rv_std)
+            A = np.clip(A, bounds_list[-2][0], bounds_list[-2][1])
+            B = np.clip(B, bounds_list[-1][0], bounds_list[-1][1])
 
-                    loglike = -1*mf.negloglike_nonstat(xbest, t_full, y_full, series_index,C, rv_std, inject_planet=args.fit_planet)[0]
+            xbest, C = mf.optimise_params_nonstat(t_full, y_full, series_index, C, bounds_list,
+                                        a0=rv_amp0,
+                                        a1=rhk_amp0,
+                                        d0=rv_offset0,
+                                        d1=rhk_offset0,
+                                        planet_p=p,
+                                        planet_A=A,
+                                        planet_B=B,
+                                        fit_planet=args.fit_planet,
+                                        change_C=args.change_C)
 
-                    if loglike > best_loglike:
-                        best_loglike = loglike
-                        xbest_all = xbest
-                        best_p_init = p
+            loglike = -1*mf.negloglike_nonstat(xbest, t_full, y_full, series_index,C, rv_std, inject_planet=args.fit_planet)[0]
+
+            if loglike > best_loglike:
+                best_loglike = loglike
+                xbest_all = xbest
+                best_p_init = p
 
         params, _ = mf.get_opt_params_nonstat(C)
         C.set_param(xbest_all[:len(params)], params)

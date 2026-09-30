@@ -558,6 +558,22 @@ def optimise_params_cyc(t_full, y_full, series_index, C, bounds_list, b = 0.0, P
     return xbest, C
 
 
+def gls_planet_amplitudes(C, t_full, resid, series_index, p, rv_std=1.0):
+    """A, B of A sin + B cos at period p that maximise the likelihood of resid
+    under covariance C: whiten with C's Cholesky factor, then least squares."""
+    X = np.zeros((len(t_full), 2))
+    arg = 2 * np.pi * t_full[series_index[0]] / (p + 0.000001)
+    X[series_index[0], 0] = np.sin(arg) / rv_std
+    X[series_index[0], 1] = np.cos(arg) / rv_std
+
+    def whiten(v):
+        return C.solveL(v, copy=True) / C.sqD()
+
+    Xw = np.column_stack([whiten(X[:, 0]), whiten(X[:, 1])])
+    AB, *_ = np.linalg.lstsq(Xw, whiten(resid), rcond=None)
+    return AB
+
+
 def optimise_params_nonstat(t_full, y_full, series_index, C, bounds_list, a0 = None, a1 = None, d0 = None, d1 = None, planet_p = 40.05, planet_A = 0.0005, planet_B = 0.0, fit_planet = True, change_C = True):
 
     if a0 is None:
@@ -575,12 +591,27 @@ def optimise_params_nonstat(t_full, y_full, series_index, C, bounds_list, a0 = N
 
     if fit_planet == True:
         x0 = np.append(x0,[a0, a1, d0, d1, planet_p, planet_A, planet_B])
-        result = fmin_l_bfgs_b(negloglike_nonstat, x0, args=(t_full, y_full, series_index, C, 1.0, True), bounds=bounds_list)
-        xbest = result[0]
     else:
         x0 = np.append(x0,[a0, a1, d0, d1])
-        result = fmin_l_bfgs_b(negloglike_nonstat, x0, args=(t_full, y_full, series_index, C, 1.0, False), bounds=bounds_list)
-        xbest = result[0]
+
+    # L-BFGS-B runs on x / scales so every parameter is of order 1 to it (the
+    # raw parameters span ~1e-4 to ~1e3): each scale is the parameter's starting
+    # size, floored at 1e-3 of its bound width; the planet period uses the width
+    # of its likelihood peak (~P^2/T) and the planet amplitudes the RV std
+    widths = np.array([hi - lo if lo is not None and hi is not None else np.inf for lo, hi in bounds_list])
+    scales = np.maximum(np.abs(x0), np.where(np.isfinite(widths), 1e-3 * widths, 1e-8))
+    if fit_planet == True:
+        scales[-3] = planet_p**2 / np.max(t_full)
+        scales[-2:] = np.std(y_full[series_index[0]])
+
+    def scaled_negloglike(z):
+        nll, grad = negloglike_nonstat(z * scales, t_full, y_full, series_index, C, 1.0, fit_planet)
+        return nll, grad * scales
+
+    scaled_bounds = [(None if lo is None else lo / s, None if hi is None else hi / s)
+                     for (lo, hi), s in zip(bounds_list, scales)]
+    result = fmin_l_bfgs_b(scaled_negloglike, x0 / scales, bounds=scaled_bounds)
+    xbest = result[0] * scales
 
     if change_C == True:
         C.set_param(xbest[:len(params)], params)
@@ -622,7 +653,11 @@ def log_prior_nonstat(theta, bounds_list, planet = True):
     if planet == True:
         rv_jit, rhk_jit, b, P, phi, c, rot_P0, rot_rho, rot_eta, rot_alpha_0, rot_alpha_1, rot_beta_0, a0, a1, d0, d1, planet_period, planet_A, planet_B = theta
         if bounds_list[0][0] < rv_jit < bounds_list[0][1] and bounds_list[1][0] < rhk_jit < bounds_list[1][1] and bounds_list[2][0] < b < bounds_list[2][1] and bounds_list[3][0] < P < bounds_list[3][1] and bounds_list[4][0] < phi < bounds_list[4][1] and bounds_list[5][0] < c < bounds_list[5][1] and bounds_list[6][0] < rot_P0 < bounds_list[6][1] and bounds_list[7][0] < rot_rho < bounds_list[7][1] and bounds_list[8][0] < rot_eta < bounds_list[8][1] and bounds_list[9][0] < rot_alpha_0 < bounds_list[9][1] and bounds_list[10][0] < rot_alpha_1 < bounds_list[10][1] and bounds_list[11][0] < rot_beta_0 < bounds_list[11][1] and bounds_list[12][0] < a0 < bounds_list[12][1] and bounds_list[13][0] < a1 < bounds_list[13][1] and bounds_list[14][0] < d0 < bounds_list[14][1] and bounds_list[15][0] < d1 < bounds_list[15][1] and bounds_list[16][0] < planet_period < bounds_list[16][1] and bounds_list[17][0] < planet_A < bounds_list[17][1] and bounds_list[18][0] < planet_B < bounds_list[18][1]:
-            return -np.log(planet_A) - np.log(planet_B)
+            # log-uniform in K = sqrt(A^2 + B^2), uniform in phase: p(A, B) ∝ 1/K^2,
+            # cut off at K = 1e-6 where the 1/K^2 density would diverge
+            K = np.hypot(planet_A, planet_B)
+            if K > 1e-6:
+                return -2 * np.log(K)
         return -np.inf
 
     else:
