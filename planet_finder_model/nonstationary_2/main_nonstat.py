@@ -42,8 +42,8 @@ def build_parser():
 
     # Bounds
     parser.add_argument("--cycle-b-max-drift", type=float, default=5.0, help="Max |b|*T, i.e. linear drift of the core over the time baseline")
-    parser.add_argument("--Pcyc-min", type=float, default=1000.0)
-    parser.add_argument("--Pcyc-max", type=float, default=10000.0)
+    parser.add_argument("--Pcyc-min", type=float, default=3000.0)
+    parser.add_argument("--Pcyc-max", type=float, default=5500.0)
     parser.add_argument("--phi-min", type=float, default=-np.pi)
     parser.add_argument("--phi-max", type=float, default=np.pi)
     parser.add_argument("--cycle-c-min", type=float, default=0.0)
