@@ -1,0 +1,587 @@
+300 total combos, 85 already done, 215 remaining.
+Using 9 worker processes.
+[1/215] combo done (elapsed=8.7 min, ETA=1854.7 min)
+[2/215] combo done (elapsed=9.3 min, ETA=989.2 min)
+[3/215] combo done (elapsed=11.0 min, ETA=774.6 min)
+[4/215] combo done (elapsed=21.2 min, ETA=1119.0 min)
+[5/215] combo done (elapsed=23.9 min, ETA=1004.6 min)
+[6/215] combo done (elapsed=27.4 min, ETA=953.4 min)
+[7/215] combo done (elapsed=33.4 min, ETA=993.4 min)
+[8/215] combo done (elapsed=36.1 min, ETA=934.6 min)
+[9/215] combo done (elapsed=36.8 min, ETA=843.2 min)
+[10/215] combo done (elapsed=38.5 min, ETA=789.1 min)
+[11/215] combo done (elapsed=42.5 min, ETA=787.3 min)
+[12/215] combo done (elapsed=82.2 min, ETA=1391.2 min)
+[13/215] combo done (elapsed=86.3 min, ETA=1341.1 min)
+[14/215] combo done (elapsed=87.6 min, ETA=1257.8 min)
+[15/215] combo done (elapsed=93.1 min, ETA=1241.7 min)
+[16/215] combo done (elapsed=93.5 min, ETA=1163.4 min)
+[17/215] combo done (elapsed=99.1 min, ETA=1153.7 min)
+[18/215] combo done (elapsed=107.0 min, ETA=1171.3 min)
+[19/215] combo done (elapsed=129.5 min, ETA=1335.7 min)
+[20/215] combo done (elapsed=129.7 min, ETA=1264.7 min)
+[21/215] combo done (elapsed=411.1 min, ETA=3797.9 min)
+[22/215] combo done (elapsed=412.1 min, ETA=3615.3 min)
+[23/215] combo done (elapsed=636.9 min, ETA=5317.1 min)
+[24/215] combo done (elapsed=637.4 min, ETA=5072.8 min)
+[25/215] combo done (elapsed=648.6 min, ETA=4929.7 min)
+[26/215] combo done (elapsed=700.6 min, ETA=5092.7 min)
+[27/215] combo done (elapsed=816.8 min, ETA=5687.7 min)
+[28/215] combo done (elapsed=873.0 min, ETA=5830.2 min)
+[29/215] combo done (elapsed=887.2 min, ETA=5690.4 min)
+[30/215] combo done (elapsed=887.9 min, ETA=5475.2 min)
+[31/215] combo done (elapsed=889.3 min, ETA=5278.6 min)
+[32/215] combo done (elapsed=891.0 min, ETA=5095.6 min)
+[33/215] combo done (elapsed=901.1 min, ETA=4969.6 min)
+[34/215] combo done (elapsed=901.5 min, ETA=4798.9 min)
+[35/215] combo done (elapsed=902.5 min, ETA=4641.4 min)
+[36/215] combo done (elapsed=903.2 min, ETA=4490.8 min)
+[37/215] combo done (elapsed=903.6 min, ETA=4347.2 min)
+[38/215] combo done (elapsed=904.1 min, ETA=4211.4 min)
+[39/215] combo done (elapsed=971.4 min, ETA=4383.5 min)
+[40/215] combo done (elapsed=972.7 min, ETA=4255.6 min)
+[41/215] combo done (elapsed=974.0 min, ETA=4133.4 min)
+[42/215] combo done (elapsed=978.1 min, ETA=4029.0 min)
+[43/215] combo done (elapsed=979.6 min, ETA=3918.3 min)
+[44/215] combo done (elapsed=981.7 min, ETA=3815.2 min)
+[45/215] combo done (elapsed=995.9 min, ETA=3762.3 min)
+[46/215] combo done (elapsed=996.1 min, ETA=3659.4 min)
+[47/215] combo done (elapsed=998.5 min, ETA=3569.0 min)
+[48/215] combo done (elapsed=1004.2 min, ETA=3493.8 min)
+[49/215] combo done (elapsed=1007.7 min, ETA=3413.7 min)
+[50/215] combo done (elapsed=1012.1 min, ETA=3339.8 min)
+[51/215] combo done (elapsed=1017.0 min, ETA=3270.3 min)
+[52/215] combo done (elapsed=1018.1 min, ETA=3191.5 min)
+[53/215] combo done (elapsed=1019.4 min, ETA=3115.8 min)
+[54/215] combo done (elapsed=1020.6 min, ETA=3043.0 min)
+[55/215] combo done (elapsed=1025.0 min, ETA=2981.8 min)
+[56/215] combo done (elapsed=1027.5 min, ETA=2917.4 min)
+[57/215] combo done (elapsed=1029.2 min, ETA=2853.0 min)
+[58/215] combo done (elapsed=1030.9 min, ETA=2790.4 min)
+[59/215] combo done (elapsed=1038.0 min, ETA=2744.7 min)
+[60/215] combo done (elapsed=1069.2 min, ETA=2762.0 min)
+[61/215] combo done (elapsed=1126.6 min, ETA=2844.1 min)
+[62/215] combo done (elapsed=1129.8 min, ETA=2788.0 min)
+[63/215] combo done (elapsed=1130.0 min, ETA=2726.3 min)
+[64/215] combo done (elapsed=1130.9 min, ETA=2668.3 min)
+[65/215] combo done (elapsed=1135.0 min, ETA=2619.3 min)
+[66/215] combo done (elapsed=1136.6 min, ETA=2566.0 min)
+[67/215] combo done (elapsed=1140.3 min, ETA=2518.9 min)
+[68/215] combo done (elapsed=1141.0 min, ETA=2466.6 min)
+[69/215] combo done (elapsed=1143.1 min, ETA=2418.6 min)
+[70/215] combo done (elapsed=1143.6 min, ETA=2369.0 min)
+[71/215] combo done (elapsed=1145.4 min, ETA=2323.0 min)
+[72/215] combo done (elapsed=1148.7 min, ETA=2281.3 min)
+[73/215] combo done (elapsed=1156.2 min, ETA=2249.0 min)
+[74/215] combo done (elapsed=1157.1 min, ETA=2204.8 min)
+[75/215] combo done (elapsed=1162.8 min, ETA=2170.6 min)
+[76/215] combo done (elapsed=1164.5 min, ETA=2129.7 min)
+[77/215] combo done (elapsed=1166.6 min, ETA=2090.7 min)
+[78/215] combo done (elapsed=1170.1 min, ETA=2055.2 min)
+[79/215] combo done (elapsed=1178.1 min, ETA=2028.1 min)
+[80/215] combo done (elapsed=1181.2 min, ETA=1993.2 min)
+[81/215] combo done (elapsed=1183.6 min, ETA=1958.0 min)
+[82/215] combo done (elapsed=1184.4 min, ETA=1921.0 min)
+[83/215] combo done (elapsed=1188.6 min, ETA=1890.3 min)
+[84/215] combo done (elapsed=1189.1 min, ETA=1854.4 min)
+[85/215] combo done (elapsed=1199.8 min, ETA=1835.0 min)
+[86/215] combo done (elapsed=1200.8 min, ETA=1801.2 min)
+[87/215] combo done (elapsed=1202.0 min, ETA=1768.4 min)
+[88/215] combo done (elapsed=1202.6 min, ETA=1735.6 min)
+[89/215] combo done (elapsed=1206.1 min, ETA=1707.5 min)
+[90/215] combo done (elapsed=1217.5 min, ETA=1691.0 min)
+[91/215] combo done (elapsed=1218.2 min, ETA=1660.0 min)
+[92/215] combo done (elapsed=1219.3 min, ETA=1630.1 min)
+[93/215] combo done (elapsed=1220.6 min, ETA=1601.2 min)
+[94/215] combo done (elapsed=1220.8 min, ETA=1571.4 min)
+[95/215] combo done (elapsed=1226.0 min, ETA=1548.7 min)
+[96/215] combo done (elapsed=1227.7 min, ETA=1521.8 min)
+[97/215] combo done (elapsed=1228.2 min, ETA=1494.1 min)
+[98/215] combo done (elapsed=1230.2 min, ETA=1468.7 min)
+[99/215] combo done (elapsed=1231.2 min, ETA=1442.6 min)
+[100/215] combo done (elapsed=1231.5 min, ETA=1416.3 min)
+[101/215] combo done (elapsed=1233.1 min, ETA=1391.8 min)
+[102/215] combo done (elapsed=1238.8 min, ETA=1372.4 min)
+[103/215] combo done (elapsed=1240.3 min, ETA=1348.6 min)
+[104/215] combo done (elapsed=1242.1 min, ETA=1325.7 min)
+[105/215] combo done (elapsed=1252.4 min, ETA=1312.0 min)
+[106/215] combo done (elapsed=1253.3 min, ETA=1288.8 min)
+[107/215] combo done (elapsed=1253.9 min, ETA=1265.6 min)
+[108/215] combo done (elapsed=1263.5 min, ETA=1251.8 min)
+[109/215] combo done (elapsed=1265.9 min, ETA=1231.1 min)
+[110/215] combo done (elapsed=1271.0 min, ETA=1213.2 min)
+[111/215] combo done (elapsed=1275.1 min, ETA=1194.7 min)
+[112/215] combo done (elapsed=1276.0 min, ETA=1173.5 min)
+[113/215] combo done (elapsed=1277.7 min, ETA=1153.3 min)
+[114/215] combo done (elapsed=1284.2 min, ETA=1137.7 min)
+[115/215] combo done (elapsed=1285.2 min, ETA=1117.5 min)
+[116/215] combo done (elapsed=1286.1 min, ETA=1097.6 min)
+[117/215] combo done (elapsed=1286.6 min, ETA=1077.7 min)
+[118/215] combo done (elapsed=1293.7 min, ETA=1063.5 min)
+[119/215] combo done (elapsed=1294.8 min, ETA=1044.6 min)
+[120/215] combo done (elapsed=1297.0 min, ETA=1026.8 min)
+[121/215] combo done (elapsed=1300.9 min, ETA=1010.6 min)
+[122/215] combo done (elapsed=1303.0 min, ETA=993.3 min)
+[123/215] combo done (elapsed=1303.5 min, ETA=975.0 min)
+[124/215] combo done (elapsed=1312.1 min, ETA=962.9 min)
+[125/215] combo done (elapsed=1312.6 min, ETA=945.1 min)
+[126/215] combo done (elapsed=1312.9 min, ETA=927.3 min)
+[127/215] combo done (elapsed=1314.3 min, ETA=910.7 min)
+[128/215] combo done (elapsed=1315.5 min, ETA=894.1 min)
+[129/215] combo done (elapsed=1320.8 min, ETA=880.5 min)
+[130/215] combo done (elapsed=1324.7 min, ETA=866.1 min)
+[131/215] combo done (elapsed=1325.4 min, ETA=849.9 min)
+[132/215] combo done (elapsed=1325.6 min, ETA=833.5 min)
+[133/215] combo done (elapsed=1327.3 min, ETA=818.3 min)
+[134/215] combo done (elapsed=1330.2 min, ETA=804.1 min)
+[135/215] combo done (elapsed=1332.5 min, ETA=789.6 min)
+[136/215] combo done (elapsed=1332.6 min, ETA=774.1 min)
+[137/215] combo done (elapsed=1333.2 min, ETA=759.1 min)
+[138/215] combo done (elapsed=1342.8 min, ETA=749.3 min)
+[139/215] combo done (elapsed=1345.9 min, ETA=735.9 min)
+[140/215] combo done (elapsed=1351.6 min, ETA=724.1 min)
+[141/215] combo done (elapsed=1354.1 min, ETA=710.6 min)
+[142/215] combo done (elapsed=1354.2 min, ETA=696.2 min)
+[143/215] combo done (elapsed=1356.2 min, ETA=682.8 min)
+[144/215] combo done (elapsed=1357.3 min, ETA=669.2 min)
+[145/215] combo done (elapsed=1359.0 min, ETA=656.1 min)
+[146/215] combo done (elapsed=1361.9 min, ETA=643.6 min)
+[147/215] combo done (elapsed=1370.5 min, ETA=634.0 min)
+[148/215] combo done (elapsed=1377.1 min, ETA=623.4 min)
+[149/215] combo done (elapsed=1378.7 min, ETA=610.7 min)
+[150/215] combo done (elapsed=1379.1 min, ETA=597.6 min)
+[151/215] combo done (elapsed=1381.7 min, ETA=585.6 min)
+[152/215] combo done (elapsed=1382.6 min, ETA=573.0 min)
+[153/215] combo done (elapsed=1383.3 min, ETA=560.5 min)
+[154/215] combo done (elapsed=1387.2 min, ETA=549.5 min)
+[155/215] combo done (elapsed=1388.5 min, ETA=537.5 min)
+[156/215] combo done (elapsed=1391.2 min, ETA=526.2 min)
+[157/215] combo done (elapsed=1391.6 min, ETA=514.1 min)
+[158/215] combo done (elapsed=1393.5 min, ETA=502.7 min)
+[159/215] combo done (elapsed=1394.9 min, ETA=491.3 min)
+[160/215] combo done (elapsed=1395.3 min, ETA=479.6 min)
+[161/215] combo done (elapsed=1395.4 min, ETA=468.0 min)
+[162/215] combo done (elapsed=1397.7 min, ETA=457.3 min)
+[163/215] combo done (elapsed=1397.8 min, ETA=445.9 min)
+[164/215] combo done (elapsed=1399.1 min, ETA=435.1 min)
+/opt/anaconda3/envs/sleaf/lib/python3.10/site-packages/spleaf/__init__.py:285: RuntimeWarning: invalid value encountered in log
+  self._logdet_value = np.sum(np.log(self.D))
+[165/215] combo done (elapsed=1405.5 min, ETA=425.9 min)
+[166/215] combo done (elapsed=1405.6 min, ETA=414.9 min)
+[167/215] combo done (elapsed=1406.0 min, ETA=404.1 min)
+[168/215] combo done (elapsed=1406.2 min, ETA=393.4 min)
+/opt/anaconda3/envs/sleaf/lib/python3.10/site-packages/spleaf/__init__.py:285: RuntimeWarning: invalid value encountered in log
+  self._logdet_value = np.sum(np.log(self.D))
+[169/215] combo done (elapsed=1407.9 min, ETA=383.2 min)
+[170/215] combo done (elapsed=1529.1 min, ETA=404.8 min)
+[171/215] combo done (elapsed=1533.1 min, ETA=394.5 min)
+[172/215] combo done (elapsed=1540.0 min, ETA=385.0 min)
+[173/215] combo done (elapsed=1542.6 min, ETA=374.5 min)
+[174/215] combo done (elapsed=1543.4 min, ETA=363.7 min)
+[175/215] combo done (elapsed=1544.6 min, ETA=353.0 min)
+[176/215] combo done (elapsed=1545.0 min, ETA=342.4 min)
+[177/215] combo done (elapsed=1556.3 min, ETA=334.1 min)
+[178/215] combo done (elapsed=1564.1 min, ETA=325.1 min)
+[179/215] combo done (elapsed=1568.2 min, ETA=315.4 min)
+[180/215] combo done (elapsed=1571.1 min, ETA=305.5 min)
+[181/215] combo done (elapsed=1580.6 min, ETA=296.9 min)
+[182/215] combo done (elapsed=1584.0 min, ETA=287.2 min)
+[183/215] combo done (elapsed=1584.8 min, ETA=277.1 min)
+[184/215] combo done (elapsed=1585.8 min, ETA=267.2 min)
+[185/215] combo done (elapsed=1586.4 min, ETA=257.3 min)
+[186/215] combo done (elapsed=1587.4 min, ETA=247.5 min)
+[187/215] combo done (elapsed=1591.7 min, ETA=238.3 min)
+[188/215] combo done (elapsed=1593.1 min, ETA=228.8 min)
+[189/215] combo done (elapsed=1593.7 min, ETA=219.2 min)
+[190/215] combo done (elapsed=1594.7 min, ETA=209.8 min)
+[191/215] combo done (elapsed=1594.7 min, ETA=200.4 min)
+[192/215] combo done (elapsed=1595.2 min, ETA=191.1 min)
+[193/215] combo done (elapsed=1595.3 min, ETA=181.8 min)
+[194/215] combo done (elapsed=1596.2 min, ETA=172.8 min)
+[195/215] combo done (elapsed=1598.7 min, ETA=164.0 min)
+[196/215] combo done (elapsed=1602.2 min, ETA=155.3 min)
+[197/215] combo done (elapsed=1603.0 min, ETA=146.5 min)
+[198/215] combo done (elapsed=1605.0 min, ETA=137.8 min)
+[199/215] combo done (elapsed=1608.3 min, ETA=129.3 min)
+[200/215] combo done (elapsed=1608.4 min, ETA=120.6 min)
+[201/215] combo done (elapsed=1608.5 min, ETA=112.0 min)
+[202/215] combo done (elapsed=1608.8 min, ETA=103.5 min)
+[203/215] combo done (elapsed=1609.4 min, ETA=95.1 min)
+[204/215] combo done (elapsed=1616.9 min, ETA=87.2 min)
+[205/215] combo done (elapsed=1618.0 min, ETA=78.9 min)
+[206/215] combo done (elapsed=1622.2 min, ETA=70.9 min)
+[207/215] combo done (elapsed=1624.7 min, ETA=62.8 min)
+[208/215] combo done (elapsed=1624.8 min, ETA=54.7 min)
+[209/215] combo done (elapsed=1625.4 min, ETA=46.7 min)
+[210/215] combo done (elapsed=1628.1 min, ETA=38.8 min)
+[211/215] combo done (elapsed=1629.1 min, ETA=30.9 min)
+[212/215] combo done (elapsed=1632.2 min, ETA=23.1 min)
+[213/215] combo done (elapsed=1640.9 min, ETA=15.4 min)
+[214/215] combo done (elapsed=1641.0 min, ETA=7.7 min)
+[215/215] combo done (elapsed=1643.6 min, ETA=0.0 min)
+initial period guess: 400.0, FAP: 2.4349925347872278e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 5.878895630585224e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 4.476635305798376e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 2.1853562992611342e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 2.6940212328324595e-07
+1 3 3
+initial period guess: 7.84989085321577, FAP: 6.316135000281908e-60
+2 5 5
+Maximum number of planets reached
+initial period guess: 7.8516105862074825, FAP: 8.7689069502905e-310
+1 3 3
+initial period guess: 13.335120259429072, FAP: 5.670575857088809e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 7.8516105862074825, FAP: 0.0
+1 3 3
+initial period guess: 7.83958825472463, FAP: 7.036981524192576e-29
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 2.23979247413234e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 6.573074313364417e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 2.324645027051901e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 6.251507333911869e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 7.4251103168417e-08
+1 3 3
+initial period guess: 15.124692634141228, FAP: 5.060246545712348e-60
+2 5 5
+Maximum number of planets reached
+initial period guess: 15.118312518814989, FAP: 5.423907832996543e-300
+1 3 3
+initial period guess: 13.335120259429072, FAP: 6.741037982417134e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 15.118312518814989, FAP: 0.0
+1 3 3
+initial period guess: 15.073801983513363, FAP: 3.0003818700637705e-94
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 2.4285531530116936e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 5.86757863200398e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 1.7056162707129014e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 4.797448637279997e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 5.723258958700391e-09
+1 3 3
+initial period guess: 29.099943853736832, FAP: 1.3105311036031195e-48
+2 5 5
+Maximum number of planets reached
+initial period guess: 29.099943853736832, FAP: 8.643618708606e-311
+1 3 3
+initial period guess: 13.335120259429072, FAP: 6.056388415562052e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 29.099943853736832, FAP: 0.0
+1 3 3
+initial period guess: 28.935484114727636, FAP: 4.7076784821788186e-130
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 2.1084114658265265e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 6.227224033496e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 2.4892357574793468e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 6.014203514659971e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 5.071896103034521e-08
+1 3 3
+initial period guess: 56.1220293526287, FAP: 2.5031876482456137e-49
+2 5 5
+Maximum number of planets reached
+initial period guess: 56.034283652496185, FAP: 3.310756329067109e-298
+1 3 3
+initial period guess: 13.335120259429072, FAP: 7.51530140431435e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 56.034283652496185, FAP: 0.0
+1 3 3
+initial period guess: 55.427663147855995, FAP: 9.866944169744282e-103
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 2.0021201154495202e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 5.896686373284212e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 107.7558593640031, FAP: 1.9845622376160442e-60
+1 3 3
+initial period guess: 13.335120259429072, FAP: 5.452617359180723e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 107.7558593640031, FAP: 0.0
+1 3 3
+initial period guess: 110.07248772911032, FAP: 1.9873566070001728e-231
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 2.0106767881647413e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 7.151626943153046e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 208.85627977369532, FAP: 3.726344722551808e-300
+1 3 3
+initial period guess: 200.6703604256354, FAP: 8.008428918327588e-66
+2 5 5
+Maximum number of planets reached
+initial period guess: 207.6462105912773, FAP: 0.0
+1 3 3
+initial period guess: 216.42359901652165, FAP: 6.887308144702475e-269
+2 5 5
+Maximum number of planets reached
+initial period guess: 395.5849220666802, FAP: 2.12274642417036e-249
+1 3 3
+initial period guess: 367.2126536010576, FAP: 4.571017024193819e-35
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 0.0
+1 3 3
+initial period guess: 13.335120259429072, FAP: 6.038252530829937e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 4.077948308210807, FAP: 0.0
+1 3 3
+initial period guess: 4.074702862463771, FAP: 5.550215618672737e-293
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 4.936600541613474e-09
+1 3 3
+initial period guess: 7.8516105862074825, FAP: 3.122502545980722e-61
+2 5 5
+Maximum number of planets reached
+initial period guess: 7.8516105862074825, FAP: 1.2484826146e-314
+1 3 3
+initial period guess: 13.335120259429072, FAP: 5.06239594394046e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 7.8516105862074825, FAP: 0.0
+1 3 3
+initial period guess: 7.83958825472463, FAP: 1.2785011122106767e-25
+2 5 5
+Maximum number of planets reached
+initial period guess: 7.8516105862074825, FAP: 0.0
+1 3 3
+initial period guess: 7.863669847805186, FAP: 9.95851507197988e-309
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 2.2930500184610217e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 8.010031852457681e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 2.4755334176709095e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 1.3276959978108712e-06
+2 5 5
+Maximum number of planets reached
+initial period guess: 29.099943853736832, FAP: 1.8101114651356515e-61
+1 3 3
+initial period guess: 13.335120259429072, FAP: 2.425830025906673e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 29.099943853736832, FAP: 0.0
+1 3 3
+initial period guess: 29.266283748655795, FAP: 2.8682633972910726e-31
+2 5 5
+Maximum number of planets reached
+initial period guess: 29.099943853736832, FAP: 0.0
+1 3 3
+initial period guess: 29.266283748655795, FAP: 2.6451954592947066e-297
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 2.183269231871222e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 5.929031892292483e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 2.5288518930355526e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 6.12306185952808e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 55.772685130764906, FAP: 1.4180643365045873e-09
+1 3 3
+initial period guess: 56.47577754521487, FAP: 8.815002436455427e-08
+2 5 5
+Maximum number of planets reached
+initial period guess: 56.034283652496185, FAP: 2.4334899426792655e-298
+1 3 3
+initial period guess: 13.335120259429072, FAP: 7.509621532593734e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 56.034283652496185, FAP: 0.0
+1 3 3
+initial period guess: 55.427663147855995, FAP: 1.712289638666916e-17
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 2.4289845450658908e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 6.786448788256994e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 4.6110213637064106e-08
+1 3 3
+initial period guess: 108.08081806559588, FAP: 1.197425710531596e-53
+2 5 5
+Maximum number of planets reached
+initial period guess: 108.08081806559588, FAP: 0.0
+1 3 3
+initial period guess: 105.84641524895183, FAP: 3.002043934417673e-85
+2 5 5
+Maximum number of planets reached
+initial period guess: 107.7558593640031, FAP: 0.0
+1 3 3
+initial period guess: 110.07248772911032, FAP: 0.0
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 1.709897521695213e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 7.579139142699033e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 206.45008240829597, FAP: 2.618544320648625e-32
+1 3 3
+initial period guess: 13.335120259429072, FAP: 2.2214865793923866e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 207.6462105912773, FAP: 0.0
+1 3 3
+initial period guess: 217.73845566278067, FAP: 9.841586818685187e-25
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 3.7460010542835354e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 6.038356888460753e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 4.3443760913295203e-13
+1 3 3
+initial period guess: 13.335120259429072, FAP: 6.038356538541714e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 0.0
+1 3 3
+initial period guess: 13.335120259429072, FAP: 6.038350832231607e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 0.0
+1 3 3
+initial period guess: 13.335120259429072, FAP: 6.038355476305391e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 4.077948308210807, FAP: 0.0
+1 3 3
+initial period guess: 4.074702862463771, FAP: 0.0
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 1.6841794118298593e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 8.986359529319003e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 15.111937783923068, FAP: 3.7200559251412955e-58
+1 3 3
+initial period guess: 13.335120259429072, FAP: 8.949346938523891e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 15.118312518814989, FAP: 0.0
+1 3 3
+initial period guess: 15.169504667474975, FAP: 1.1027297886979515e-20
+2 5 5
+Maximum number of planets reached
+initial period guess: 15.118312518814989, FAP: 0.0
+1 3 3
+initial period guess: 15.163086697650263, FAP: 0.0
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 2.3836407335854086e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 5.918451535221881e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 1.6934447772931095e-08
+1 3 3
+initial period guess: 56.034283652496185, FAP: 8.781931903686746e-68
+2 5 5
+Maximum number of planets reached
+initial period guess: 56.034283652496185, FAP: 9.351759571280727e-306
+1 3 3
+initial period guess: 13.335120259429072, FAP: 7.053221668299661e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 56.034283652496185, FAP: 0.0
+1 3 3
+initial period guess: 56.654329236956364, FAP: 4.864395273961936e-15
+2 5 5
+Maximum number of planets reached
+initial period guess: 56.034283652496185, FAP: 0.0
+1 3 3
+initial period guess: 56.654329236956364, FAP: 4.909762304965259e-260
+2 5 5
+Maximum number of planets reached
+initial period guess: 107.7558593640031, FAP: 1.64856663801e-312
+1 3 3
+initial period guess: 13.335120259429072, FAP: 8.843262836510209e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 107.7558593640031, FAP: 0.0
+1 3 3
+initial period guess: 110.07248772911032, FAP: 0.0
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 2.0168829748873788e-08
+1 3 3
+initial period guess: 13.335120259429072, FAP: 6.298444856652968e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 207.6462105912773, FAP: 1.234257014163659e-83
+1 3 3
+initial period guess: 13.335120259429072, FAP: 5.697601044478478e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 207.6462105912773, FAP: 0.0
+1 3 3
+initial period guess: 199.55303362036804, FAP: 6.777643169040347e-24
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 2.537908431402367e-09
+1 3 3
+initial period guess: 13.335120259429072, FAP: 6.03835690590083e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 4.3756312976497354e-07
+1 3 3
+initial period guess: 13.335120259429072, FAP: 6.038357093708249e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 6.140718382252193e-23
+1 3 3
+initial period guess: 13.335120259429072, FAP: 6.038357986726046e-07
+2 5 5
+Maximum number of planets reached
+initial period guess: 400.0, FAP: 0.0
+1 3 3
+initial period guess: 13.335120259429072, FAP: 6.038367931039076e-07
+2 5 5
+Maximum number of planets reached
+Done.

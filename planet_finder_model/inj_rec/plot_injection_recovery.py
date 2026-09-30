@@ -20,8 +20,8 @@ import matplotlib.pyplot as plt
 
 def build_parser():
     parser = argparse.ArgumentParser(description="Plot the injection-recovery grid comparing cyc vs nonstat.")
-    parser.add_argument("--input-csv", default="results/injection_recovery.csv")
-    parser.add_argument("--output", default="results/injection_recovery_grid.png")
+    parser.add_argument("--input-csv", default="inj_rec/injection_recovery.csv")
+    parser.add_argument("--output", default="inj_rec/injection_recovery_grid.png")
     parser.add_argument("--n-period-bins", type=int, default=6)
     parser.add_argument("--n-k-bins", type=int, default=6)
     parser.add_argument("--period-bin-edges", type=str, default=None,
@@ -33,7 +33,7 @@ def build_parser():
     parser.add_argument("--tcrit-path", default="results/null_calibration/tcrit.json",
                          help="Path to the tcrit.json produced by null_calibration.py, used to annotate "
                               "each panel with that mode's calibrated T_crit and to build the summary table.")
-    parser.add_argument("--summary-output", default="results/injection_recovery_summary.csv")
+    parser.add_argument("--summary-output", default="inj_rec/injection_recovery_summary.csv")
     return parser
 
 

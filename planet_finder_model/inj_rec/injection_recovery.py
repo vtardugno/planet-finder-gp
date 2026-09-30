@@ -38,24 +38,27 @@ for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
 import matplotlib
 matplotlib.use("Agg")
 
+import sys
+# functions.py and the nonstationary* model dirs live in the parent folder
+_PARENT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _PARENT)
 import functions as mf
 import numpy as np
 from spleaf import cov, term
 import argparse
-import sys
 import csv
 import json
 import time
 import importlib.util
 import multiprocessing as mp
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "nonstationary"))
+sys.path.insert(0, os.path.join(_PARENT, "nonstationary"))
 import functions_nonstat as mfn
 
 # nonstationary_2's module has the same name as nonstationary's, so load it
 # explicitly from file under a distinct name
 _spec = importlib.util.spec_from_file_location(
-    "functions_nonstat_2", os.path.join(os.path.dirname(os.path.abspath(__file__)), "nonstationary_2", "functions_nonstat.py"))
+    "functions_nonstat_2", os.path.join(_PARENT, "nonstationary_2", "functions_nonstat.py"))
 mfn2 = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(mfn2)
 
@@ -201,7 +204,7 @@ def build_parser():
     parser.add_argument("--cycle-phi0", type=float, default=0.0)
     parser.add_argument("--mu0", type=float, default=0.0)
 
-    parser.add_argument("--output-csv", default="results/injection_recovery.csv")
+    parser.add_argument("--output-csv", default="inj_rec/injection_recovery.csv")
     parser.add_argument("--n-workers", type=int, default=None)
     parser.add_argument("--force-fresh", action="store_true")
     parser.add_argument("--seed", type=int, default=12345)
@@ -509,49 +512,59 @@ def fit_nonstat2(t_full, y_full, yerr_full, series_index, stds, args, planet_gue
     qp_amps0 = np.array([stds[0], stds[1]]) / core_rms0
     qp_beta0 = np.array([stds[0], 0.0]) / core_rms0
 
+    def make_C():
+        return cov.Cov(
+            t_full,
+            err=term.Error(yerr_full),
+            rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
+            rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
+            rot=term.SimpleProductKernel(
+                nonstat=mfn2.make_nonstat_kernel(T, b0, P0, phi0, c0),
+                qp=MultiSeriesKernel(term.MEPKernel(args.sig, args.prot, args.rho, args.eta), series_index,
+                                     qp_amps0, qp_beta0),
+            ),
+        )
+
     best_loglike = -np.inf
     xbest_all = None
     best_bounds_list = None
     best_period_guess = None
 
+    # One start per period guess (instead of the fixed A/B multi-start): the
+    # planet A/B start at their generalised-least-squares values given the
+    # starting GP and cycle mean (the fit itself runs on rescaled parameters,
+    # see mfn2.optimise_params_nonstat)
     guesses = planet_guess if fit_planet else [None]
-    a_fracs = A_INIT_FRACS if fit_planet else [1.0]
-    b_fracs = B_INIT_FRACS if fit_planet else [1.0]
 
     for p in guesses:
         period_bounds = (max(p - 10, 1.1), min(p + 10, args.period_max)) if fit_planet else None
         bounds_list = build_bounds_list_nonstat2(args, stds, means, T, period_bounds, amp_bound, fit_planet=fit_planet)
 
-        for Afrac in a_fracs:
-            for Bfrac in b_fracs:
-                C = cov.Cov(
-                    t_full,
-                    err=term.Error(yerr_full),
-                    rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
-                    rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
-                    rot=term.SimpleProductKernel(
-                        nonstat=mfn2.make_nonstat_kernel(T, b0, P0, phi0, c0),
-                        qp=MultiSeriesKernel(term.MEPKernel(args.sig, args.prot, args.rho, args.eta), series_index,
-                                             qp_amps0, qp_beta0),
-                    ),
-                )
+        C = make_C()
+        A0 = B0 = 0.0
+        if fit_planet:
+            resid = y_full.copy()
+            resid[series_index[0]] -= (rv_amp0 * mfn2.shared_core_pos(t_full[series_index[0]], b0, P0, phi0, c0, T)
+                                       + rv_offset0)
+            resid[series_index[1]] -= (rhk_amp0 * mfn2.shared_core_pos(t_full[series_index[1]], b0, P0, phi0, c0, T)
+                                       + rhk_offset0)
+            A0, B0 = np.clip(mfn2.gls_planet_amplitudes(C, t_full, resid, series_index, p, rv_std),
+                             -amp_bound, amp_bound)
 
-                xbest, C = mfn2.optimise_params_nonstat(
-                    t_full, y_full, series_index, C, bounds_list,
-                    a0=rv_amp0, a1=rhk_amp0, d0=rv_offset0, d1=rhk_offset0,
-                    planet_p=(p if fit_planet else args.cycle_P0),
-                    planet_A=args.planet_A_fit * Afrac, planet_B=args.planet_B_fit * Bfrac,
-                    fit_planet=fit_planet, change_C=True,
-                )
+        xbest, C = mfn2.optimise_params_nonstat(
+            t_full, y_full, series_index, C, bounds_list,
+            a0=rv_amp0, a1=rhk_amp0, d0=rv_offset0, d1=rhk_offset0,
+            planet_p=(p if fit_planet else args.cycle_P0), planet_A=A0, planet_B=B0,
+            fit_planet=fit_planet, change_C=True,
+        )
+        loglike = -1 * mfn2.negloglike_nonstat(xbest, t_full, y_full, series_index, C, rv_std,
+                                                inject_planet=fit_planet)[0]
 
-                loglike = -1 * mfn2.negloglike_nonstat(xbest, t_full, y_full, series_index, C, rv_std,
-                                                        inject_planet=fit_planet)[0]
-
-                if loglike > best_loglike:
-                    best_loglike = loglike
-                    xbest_all = xbest
-                    best_bounds_list = bounds_list
-                    best_period_guess = p
+        if loglike > best_loglike:
+            best_loglike = loglike
+            xbest_all = xbest
+            best_bounds_list = bounds_list
+            best_period_guess = p
 
     diagnostics = {
         "at_bounds": at_bounds_params(xbest_all, best_bounds_list) if xbest_all is not None else [],

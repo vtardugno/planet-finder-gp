@@ -21,7 +21,7 @@ import pandas as pd
 def build_parser():
     parser = argparse.ArgumentParser(description="Pool multiple injection-recovery CSVs into one merged grid.")
     parser.add_argument("inputs", nargs="+", help="CSV file paths or glob patterns to pool together.")
-    parser.add_argument("--output", default="results/injection_recovery_pooled.csv")
+    parser.add_argument("--output", default="inj_rec/injection_recovery_pooled.csv")
     parser.add_argument("--rel-tol", type=float, default=1e-3,
                          help="Relative tolerance for treating two period/K values from "
                               "different runs as the same grid point.")
