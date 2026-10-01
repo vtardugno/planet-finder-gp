@@ -2,11 +2,15 @@
 
 For each (period, semi-amplitude K, orbital phase) combination on a log-spaced
 grid, injects a synthetic planet into the Solar RV data and fits it with
-whichever of the three models --models selects: cyc (functions.py),
-nonstat (nonstationary/functions_nonstat.py), and no_cycle (functions.py's
-bare-GP branch), using the same blind periodogram + multi-start L-BFGS-B
-search each existing single-injection script (main_cycle_likelihood.py /
-nonstationary/main_nonstat.py / main.py --no-fit-cycle) already uses.
+whichever models --models selects: cyc (cyc_pipeline2/functions.py),
+nonstat (nonstationary/nonstationary_pipeline2/functions_nonstat.py),
+nonstat2 (nonstationary_2/functions_nonstat.py), and no_cycle
+(cyc_pipeline2/functions.py's bare-GP branch), using the same pipeline-2
+search each single-injection script (cyc_pipeline2/main_cycle_likelihood.py
+[--no-fit-cycle] / nonstationary/nonstationary_pipeline2/main_nonstat.py /
+nonstationary_2/main_nonstat.py) uses: a blind periodogram, then one
+L-BFGS-B start per period guess with planet A/B seeded by generalised least
+squares, optimised on rescaled parameters.
 Results are appended to a CSV as they complete, so the sweep can be
 interrupted and resumed by simply re-running the same command. Resumability
 is tracked per (combo, mode): re-running with a different --models against
@@ -14,14 +18,10 @@ an existing --output-csv only computes whichever modes are still missing for
 each combo, so e.g. adding no_cycle to a CSV that already has cyc/nonstat
 never recomputes those.
 
-A planet is considered "recovered" only if BOTH:
-  1. The best-fit period/K land within tolerance of the injected truth
-     (the original parameter-matching criterion), AND
-  2. The detection statistic T = 2*(logL_max(GP+planet) - logL_max(GP only))
-     exceeds a per-mode threshold T_crit, empirically calibrated ahead of
-     time by null_calibration.py at a target false-positive rate and saved
-     to --tcrit-path.
-See null_calibration.py for how T_crit is calibrated.
+One planet is assumed present: a planet is considered "recovered" if the
+best-fit period/K land within tolerance of the injected truth. See
+injection_recovery_mgic.py for the version that also requires the planet
+model to be preferred over a planet-less one.
 """
 
 import os
@@ -38,29 +38,30 @@ for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
 import matplotlib
 matplotlib.use("Agg")
 
-import sys
-# functions.py and the nonstationary* model dirs live in the parent folder
+# the model dirs (cyc_pipeline2, nonstationary*) live in the parent folder
 _PARENT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, _PARENT)
-import functions as mf
 import numpy as np
 from spleaf import cov, term
 import argparse
 import csv
-import json
 import time
 import importlib.util
 import multiprocessing as mp
 
-sys.path.insert(0, os.path.join(_PARENT, "nonstationary"))
-import functions_nonstat as mfn
 
-# nonstationary_2's module has the same name as nonstationary's, so load it
-# explicitly from file under a distinct name
-_spec = importlib.util.spec_from_file_location(
-    "functions_nonstat_2", os.path.join(_PARENT, "nonstationary_2", "functions_nonstat.py"))
-mfn2 = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(mfn2)
+def _load_module(name, relpath):
+    # The pipeline-2 modules share their names (functions / functions_nonstat)
+    # with the old ones, so load each explicitly from file under a distinct name
+    spec = importlib.util.spec_from_file_location(name, os.path.join(_PARENT, relpath))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+mf = _load_module("functions_pipeline2", os.path.join("cyc_pipeline2", "functions.py"))
+mfn = _load_module("functions_nonstat_pipeline2",
+                   os.path.join("nonstationary", "nonstationary_pipeline2", "functions_nonstat.py"))
+mfn2 = _load_module("functions_nonstat_2", os.path.join("nonstationary_2", "functions_nonstat.py"))
 
 
 class MultiSeriesKernel(term.MultiSeriesKernel):
@@ -70,23 +71,14 @@ class MultiSeriesKernel(term.MultiSeriesKernel):
     return super()._grad_param()
 
 
-A_INIT_FRACS = [1.0, 0.1, 0.01, 0.001]
-B_INIT_FRACS = [1.0, 0.1, 0.01, 0.001]
-
 CSV_FIELDS = [
     "period_idx", "k_idx", "phase_idx",
     "period_inj", "k_inj", "phase_inj", "A_inj", "B_inj",
     "mode", "P_rec", "K_rec", "A_rec", "B_rec",
     "best_loglike", "recovered",
-    # --- likelihood-ratio detection (additive) ---
-    "loglike_gp_only", "T_stat", "t_crit", "alpha_fpr",
-    "likelihood_ratio_pass", "param_match_pass",
-    "period_tolerance", "k_tolerance",
-    # --- BIC diagnostics only, not used for detection (additive) ---
-    "bic_gp_only", "bic_gp_planet", "delta_bic",
-    # --- fit-quality diagnostics, recorded not discarded (additive) ---
-    "gp_planet_at_bounds", "gp_only_at_bounds",
-    "loglike_nonfinite", "nested_model_violation",
+    "param_match_pass", "period_tolerance", "k_tolerance",
+    # --- fit-quality diagnostics, recorded not discarded ---
+    "gp_planet_at_bounds", "loglike_nonfinite",
     "diagnostic_flags",
 ]
 
@@ -138,41 +130,28 @@ def build_parser():
     parser.add_argument("--alpha1-max-frac", type=float, default=5.0)
     parser.add_argument("--beta0-max-frac", type=float, default=10.0)
 
-    # cyc / nonstat shared cycle-term bounds
-    parser.add_argument("--b-min", type=float, default=-0.5)
-    parser.add_argument("--b-max", type=float, default=0.5)
-    parser.add_argument("--Pcyc-min", type=float, default=0.5)
-    parser.add_argument("--Pcyc-max", type=float, default=10000.0)
+    # cyc / nonstat / nonstat2 shared cycle-term bounds, data-relative as in
+    # cyc_pipeline2/main_cycle_likelihood.py / nonstationary_pipeline2/main_nonstat.py:
+    # |b| <= drift/T, |a| <= frac*std, delta within mean +/- frac*std
+    parser.add_argument("--cycle-b-max-drift", type=float, default=5.0)
+    parser.add_argument("--Pcyc-min", type=float, default=3000.0)
+    parser.add_argument("--Pcyc-max", type=float, default=5500.0)
     parser.add_argument("--phi-min", type=float, default=-np.pi)
     parser.add_argument("--phi-max", type=float, default=np.pi)
-    parser.add_argument("--a0-min", type=float, default=-0.1)
-    parser.add_argument("--a0-max", type=float, default=0.1)
-    parser.add_argument("--a1-min", type=float, default=-5)
-    parser.add_argument("--a1-max", type=float, default=5)
-    parser.add_argument("--delta0-min", type=float, default=-0.1)
-    parser.add_argument("--delta0-max", type=float, default=1)
-    parser.add_argument("--delta1-min", type=float, default=-5)
-    parser.add_argument("--delta1-max", type=float, default=5)
-
-    # nonstat-only bounds (main_nonstat.py uses its own delta0/delta1 bounds,
-    # different from main_cycle_likelihood.py's above)
-    parser.add_argument("--mu-min", type=float, default=-5.0)
-    parser.add_argument("--mu-max", type=float, default=5.0)
-    parser.add_argument("--nonstat-delta0-min", type=float, default=-0.5)
-    parser.add_argument("--nonstat-delta0-max", type=float, default=0.5)
-    parser.add_argument("--nonstat-delta1-min", type=float, default=-2.0)
-    parser.add_argument("--nonstat-delta1-max", type=float, default=2.0)
-
-    # nonstat2-only bounds / warm start (same as nonstationary_2/CV_nonstat_2.py)
-    parser.add_argument("--cycle-c0", type=float, default=None)
-    parser.add_argument("--cycle-b-max-drift", type=float, default=5.0)
-    parser.add_argument("--nonstat2-Pcyc-min", type=float, default=1000.0)
-    parser.add_argument("--cycle-c-min", type=float, default=0.0)
-    parser.add_argument("--cycle-c-max", type=float, default=10.0)
     parser.add_argument("--a0-max-frac", type=float, default=10.0)
     parser.add_argument("--a1-max-frac", type=float, default=10.0)
     parser.add_argument("--delta0-max-frac", type=float, default=10.0)
     parser.add_argument("--delta1-max-frac", type=float, default=10.0)
+
+    # nonstat-only bounds
+    parser.add_argument("--mu-min", type=float, default=-5.0)
+    parser.add_argument("--mu-max", type=float, default=5.0)
+
+    # nonstat2-only bounds / warm start (same as CV/CV_nonstat_2.py)
+    parser.add_argument("--cycle-c0", type=float, default=None)
+    parser.add_argument("--nonstat2-Pcyc-min", type=float, default=3000.0)
+    parser.add_argument("--cycle-c-min", type=float, default=0.0)
+    parser.add_argument("--cycle-c-max", type=float, default=10.0)
 
     # no_cycle-only bounds (main.py --no-fit-cycle widens rho/eta -- no cycle
     # term to absorb long-period variability, so the GP's own rho/eta need
@@ -193,11 +172,6 @@ def build_parser():
     # hot-Jupiter end of the grid stays inside the fit's search space.
     parser.add_argument("--planet-amp-max", type=float, default=None)
 
-    # Multi-start initial magnitudes for planet A/B (same scale-down pattern
-    # as main_cycle_likelihood.py / main_nonstat.py)
-    parser.add_argument("--planet-A-fit", type=float, default=0.01)
-    parser.add_argument("--planet-B-fit", type=float, default=0.01)
-
     # Cycle warm-start seeds
     parser.add_argument("--cycle-b0", type=float, default=0.0)
     parser.add_argument("--cycle-P0", type=float, default=4000.0)
@@ -209,30 +183,26 @@ def build_parser():
     parser.add_argument("--force-fresh", action="store_true")
     parser.add_argument("--seed", type=int, default=12345)
 
-    # Likelihood-ratio detection criterion
+    # Recovery criterion
     parser.add_argument("--period-tolerance", type=float, default=0.10,
                          help="Relative tolerance for the recovered-period parameter-match test.")
     parser.add_argument("--k-tolerance", type=float, default=0.15,
                          help="Relative tolerance for the recovered-K parameter-match test.")
-    parser.add_argument("--tcrit-path", default="results/null_calibration/tcrit.json",
-                         help="Path to the tcrit.json produced by null_calibration.py, giving each "
-                              "mode's empirically calibrated T_crit detection threshold.")
-    parser.add_argument("--alpha", type=float, default=None,
-                         help="Optional cross-check: if given, must match the false-positive rate "
-                              "baked into --tcrit-path, or the run aborts.")
-    parser.add_argument("--no-lr-test", action="store_true",
-                         help="Skip the GP-only fit and T_crit: recovered is the period/K "
-                              "parameter-match test alone.")
 
     return parser
 
 
-def build_bounds_list_cyc(args, stds, period_bounds, amp_bound, fit_planet=True):
+def build_bounds_list_cyc(args, stds, means, T, period_bounds, amp_bound, fit_planet=True):
     rvjit_max = args.rvjit_max_frac * stds[0]
     rhkjit_max = args.rhkjit_max_frac * stds[1]
     alpha_0_max = args.alpha0_max_frac * stds[0]
     alpha_1_max = args.alpha1_max_frac * stds[1]
     beta_0_max = args.beta0_max_frac * stds[0]
+    b_max = args.cycle_b_max_drift / T
+    a0_max = args.a0_max_frac * stds[0]
+    a1_max = args.a1_max_frac * stds[1]
+    delta0_half = args.delta0_max_frac * stds[0]
+    delta1_half = args.delta1_max_frac * stds[1]
 
     bounds = [
         (0.0, rvjit_max),
@@ -243,31 +213,36 @@ def build_bounds_list_cyc(args, stds, period_bounds, amp_bound, fit_planet=True)
         (0.0, alpha_0_max),
         (-alpha_1_max, alpha_1_max),
         (-beta_0_max, beta_0_max),
-        (args.b_min, args.b_max),
+        (-b_max, b_max),
         (args.Pcyc_min, args.Pcyc_max),
         (args.phi_min, args.phi_max),
-        (args.a0_min, args.a0_max),
-        (args.a1_min, args.a1_max),
-        (args.delta0_min, args.delta0_max),
-        (args.delta1_min, args.delta1_max),
+        (-a0_max, a0_max),
+        (-a1_max, a1_max),
+        (means[0] - delta0_half, means[0] + delta0_half),
+        (means[1] - delta1_half, means[1] + delta1_half),
     ]
     if fit_planet:
         bounds += [period_bounds, (-amp_bound, amp_bound), (-amp_bound, amp_bound)]
     return bounds
 
 
-def build_bounds_list_nonstat(args, stds, period_bounds, amp_bound, fit_planet=True):
+def build_bounds_list_nonstat(args, stds, means, T, period_bounds, amp_bound, fit_planet=True):
     rvjit_max = args.rvjit_max_frac * stds[0]
     rhkjit_max = args.rhkjit_max_frac * stds[1]
     alpha_0_max = args.alpha0_max_frac * stds[0]
     alpha_1_max = args.alpha1_max_frac * stds[1]
     beta_0_max = args.beta0_max_frac * stds[0]
+    b_max = args.cycle_b_max_drift / T
+    a0_max = args.a0_max_frac * stds[0]
+    a1_max = args.a1_max_frac * stds[1]
+    delta0_half = args.delta0_max_frac * stds[0]
+    delta1_half = args.delta1_max_frac * stds[1]
 
     bounds = [
         (0.0, rvjit_max),
         (0.0, rhkjit_max),
         (args.mu_min, args.mu_max),
-        (args.b_min, args.b_max),
+        (-b_max, b_max),
         (args.Pcyc_min, args.Pcyc_max),
         (args.phi_min, args.phi_max),
         (args.prot_min, args.prot_max),
@@ -276,10 +251,10 @@ def build_bounds_list_nonstat(args, stds, period_bounds, amp_bound, fit_planet=T
         (0.0, alpha_0_max),
         (-alpha_1_max, alpha_1_max),
         (-beta_0_max, beta_0_max),
-        (args.a0_min, args.a0_max),
-        (args.a1_min, args.a1_max),
-        (args.nonstat_delta0_min, args.nonstat_delta0_max),
-        (args.nonstat_delta1_min, args.nonstat_delta1_max),
+        (-a0_max, a0_max),
+        (-a1_max, a1_max),
+        (means[0] - delta0_half, means[0] + delta0_half),
+        (means[1] - delta1_half, means[1] + delta1_half),
     ]
     if fit_planet:
         bounds += [period_bounds, (-amp_bound, amp_bound), (-amp_bound, amp_bound)]
@@ -374,53 +349,69 @@ def fallback_cycle_seed(y_full, series_index, args):
 def fit_cyc(t_full, y_full, yerr_full, series_index, stds, args, planet_guess, cycle_seed, amp_bound, rv_std,
             fit_planet=True):
     rv_offset0, rv_amp0, rhk_offset0, rhk_amp0, b0, P0, phi0 = cycle_seed
+    means = [np.mean(y_full[series_index[0]]), np.mean(y_full[series_index[1]])]
+    T = np.max(t_full)
+
+    # Keep the warm start inside the (data-relative) bounds
+    ref_bounds = build_bounds_list_cyc(args, stds, means, T, None, amp_bound, fit_planet=False)
+    phi0 = (phi0 + np.pi) % (2 * np.pi) - np.pi
+    b0 = np.clip(b0, ref_bounds[8][0], ref_bounds[8][1])
+    P0 = np.clip(P0, ref_bounds[9][0], ref_bounds[9][1])
 
     best_loglike = -np.inf
     xbest_all = None
     best_bounds_list = None
     best_period_guess = None
+    best_C = None
 
+    # One start per period guess: the planet A/B start at their generalised
+    # least-squares values given the starting GP and cycle mean (the fit itself
+    # runs on rescaled parameters, see mf.optimise_params_cyc)
     guesses = planet_guess if fit_planet else [None]
-    a_fracs = A_INIT_FRACS if fit_planet else [1.0]
-    b_fracs = B_INIT_FRACS if fit_planet else [1.0]
 
     for p in guesses:
         period_bounds = (max(p - 10, 1.1), min(p + 10, args.period_max)) if fit_planet else None
-        bounds_list = build_bounds_list_cyc(args, stds, period_bounds, amp_bound, fit_planet=fit_planet)
+        bounds_list = build_bounds_list_cyc(args, stds, means, T, period_bounds, amp_bound, fit_planet=fit_planet)
 
-        for Afrac in a_fracs:
-            for Bfrac in b_fracs:
-                C = cov.Cov(
-                    t_full,
-                    err=term.Error(yerr_full),
-                    rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
-                    rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
-                    rot=MultiSeriesKernel(term.MEPKernel(args.sig, args.prot, args.rho, args.eta), series_index,
-                                          np.array([stds[0], stds[1]]),
-                                          np.array([stds[0], 0.0])),
-                )
+        C = cov.Cov(
+            t_full,
+            err=term.Error(yerr_full),
+            rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
+            rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
+            rot=MultiSeriesKernel(term.MEPKernel(args.sig, args.prot, args.rho, args.eta), series_index,
+                                  np.array([stds[0], stds[1]]),
+                                  np.array([stds[0], 0.0])),
+        )
+        A0 = B0 = 0.0
+        if fit_planet:
+            resid = y_full.copy()
+            resid[series_index[0]] -= rv_amp0 * mf.shared_core(t_full[series_index[0]], b0, P0, phi0) + rv_offset0
+            resid[series_index[1]] -= rhk_amp0 * mf.shared_core(t_full[series_index[1]], b0, P0, phi0) + rhk_offset0
+            A0, B0 = np.clip(mf.gls_planet_amplitudes(C, t_full, resid, series_index, p, rv_std),
+                             -amp_bound, amp_bound)
 
-                xbest, C = mf.optimise_params_cyc(
-                    t_full, y_full, series_index, C, bounds_list,
-                    b=b0, P=P0, phi=phi0,
-                    a0=rv_amp0, a1=rhk_amp0, d0=rv_offset0, d1=rhk_offset0,
-                    planet_p=(p if fit_planet else args.cycle_P0),
-                    planet_A=args.planet_A_fit * Afrac, planet_B=args.planet_B_fit * Bfrac,
-                    fit_planet=fit_planet, change_C=True,
-                )
+        xbest, C = mf.optimise_params_cyc(
+            t_full, y_full, series_index, C, bounds_list,
+            b=b0, P=P0, phi=phi0,
+            a0=rv_amp0, a1=rhk_amp0, d0=rv_offset0, d1=rhk_offset0,
+            planet_p=(p if fit_planet else args.cycle_P0), planet_A=A0, planet_B=B0,
+            fit_planet=fit_planet, change_C=True,
+        )
 
-                loglike = -1 * mf.negloglike_cyc(xbest, t_full, y_full, series_index, C, rv_std,
-                                                  inject_planet=fit_planet)[0]
+        loglike = -1 * mf.negloglike_cyc(xbest, t_full, y_full, series_index, C, rv_std,
+                                          inject_planet=fit_planet)[0]
 
-                if loglike > best_loglike:
-                    best_loglike = loglike
-                    xbest_all = xbest
-                    best_bounds_list = bounds_list
-                    best_period_guess = p
+        if loglike > best_loglike:
+            best_loglike = loglike
+            xbest_all = xbest
+            best_bounds_list = bounds_list
+            best_period_guess = p
+            best_C = C
 
     diagnostics = {
         "at_bounds": at_bounds_params(xbest_all, best_bounds_list) if xbest_all is not None else [],
         "best_period_guess": best_period_guess,
+        "cov": best_C,
     }
     return xbest_all, best_loglike, diagnostics
 
@@ -428,55 +419,71 @@ def fit_cyc(t_full, y_full, yerr_full, series_index, stds, args, planet_guess, c
 def fit_nonstat(t_full, y_full, yerr_full, series_index, stds, args, planet_guess, cycle_seed, amp_bound, rv_std,
                  fit_planet=True):
     rv_offset0, rv_amp0, rhk_offset0, rhk_amp0, b0, P0, phi0 = cycle_seed
+    means = [np.mean(y_full[series_index[0]]), np.mean(y_full[series_index[1]])]
+    T = np.max(t_full)
+
+    # Keep the warm start inside the (data-relative) bounds
+    ref_bounds = build_bounds_list_nonstat(args, stds, means, T, None, amp_bound, fit_planet=False)
+    phi0 = (phi0 + np.pi) % (2 * np.pi) - np.pi
+    b0 = np.clip(b0, ref_bounds[3][0], ref_bounds[3][1])
+    P0 = np.clip(P0, ref_bounds[4][0], ref_bounds[4][1])
 
     best_loglike = -np.inf
     xbest_all = None
     best_bounds_list = None
     best_period_guess = None
+    best_C = None
 
+    # One start per period guess: the planet A/B start at their generalised
+    # least-squares values given the starting GP and cycle mean (the fit itself
+    # runs on rescaled parameters, see mfn.optimise_params_nonstat)
     guesses = planet_guess if fit_planet else [None]
-    a_fracs = A_INIT_FRACS if fit_planet else [1.0]
-    b_fracs = B_INIT_FRACS if fit_planet else [1.0]
 
     for p in guesses:
         period_bounds = (max(p - 10, 1.1), min(p + 10, args.period_max)) if fit_planet else None
-        bounds_list = build_bounds_list_nonstat(args, stds, period_bounds, amp_bound, fit_planet=fit_planet)
+        bounds_list = build_bounds_list_nonstat(args, stds, means, T, period_bounds, amp_bound, fit_planet=fit_planet)
 
-        for Afrac in a_fracs:
-            for Bfrac in b_fracs:
-                C = cov.Cov(
-                    t_full,
-                    err=term.Error(yerr_full),
-                    rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
-                    rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
-                    rot=term.SimpleProductKernel(
-                        nonstat=mfn.NonStationaryKernel(mfn.alpha_cyc, mfn.alpha_cyc_grad, mu=args.mu0, b=b0, P=P0, phi=phi0),
-                        qp=MultiSeriesKernel(term.MEPKernel(args.sig, args.prot, args.rho, args.eta), series_index,
-                                             np.array([stds[0], stds[1]]),
-                                             np.array([stds[0], 0.0])),
-                    ),
-                )
+        C = cov.Cov(
+            t_full,
+            err=term.Error(yerr_full),
+            rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
+            rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
+            rot=term.SimpleProductKernel(
+                nonstat=mfn.NonStationaryKernel(mfn.alpha_cyc, mfn.alpha_cyc_grad, mu=args.mu0, b=b0, P=P0, phi=phi0),
+                qp=MultiSeriesKernel(term.MEPKernel(args.sig, args.prot, args.rho, args.eta), series_index,
+                                     np.array([stds[0], stds[1]]),
+                                     np.array([stds[0], 0.0])),
+            ),
+        )
+        A0 = B0 = 0.0
+        if fit_planet:
+            resid = y_full.copy()
+            resid[series_index[0]] -= rv_amp0 * mfn.shared_core(t_full[series_index[0]], b0, P0, phi0) + rv_offset0
+            resid[series_index[1]] -= rhk_amp0 * mfn.shared_core(t_full[series_index[1]], b0, P0, phi0) + rhk_offset0
+            A0, B0 = np.clip(mfn.gls_planet_amplitudes(C, t_full, resid, series_index, p, rv_std),
+                             -amp_bound, amp_bound)
 
-                xbest, C = mfn.optimise_params_nonstat(
-                    t_full, y_full, series_index, C, bounds_list,
-                    a0=rv_amp0, a1=rhk_amp0, d0=rv_offset0, d1=rhk_offset0,
-                    planet_p=(p if fit_planet else args.cycle_P0),
-                    planet_A=args.planet_A_fit * Afrac, planet_B=args.planet_B_fit * Bfrac,
-                    fit_planet=fit_planet, change_C=True,
-                )
+        xbest, C = mfn.optimise_params_nonstat(
+            t_full, y_full, series_index, C, bounds_list,
+            a0=rv_amp0, a1=rhk_amp0, d0=rv_offset0, d1=rhk_offset0,
+            planet_p=(p if fit_planet else args.cycle_P0), planet_A=A0, planet_B=B0,
+            fit_planet=fit_planet, change_C=True,
+        )
 
-                loglike = -1 * mfn.negloglike_nonstat(xbest, t_full, y_full, series_index, C, rv_std,
-                                                       inject_planet=fit_planet)[0]
+        loglike = -1 * mfn.negloglike_nonstat(xbest, t_full, y_full, series_index, C, rv_std,
+                                               inject_planet=fit_planet)[0]
 
-                if loglike > best_loglike:
-                    best_loglike = loglike
-                    xbest_all = xbest
-                    best_bounds_list = bounds_list
-                    best_period_guess = p
+        if loglike > best_loglike:
+            best_loglike = loglike
+            xbest_all = xbest
+            best_bounds_list = bounds_list
+            best_period_guess = p
+            best_C = C
 
     diagnostics = {
         "at_bounds": at_bounds_params(xbest_all, best_bounds_list) if xbest_all is not None else [],
         "best_period_guess": best_period_guess,
+        "cov": best_C,
     }
     return xbest_all, best_loglike, diagnostics
 
@@ -529,6 +536,7 @@ def fit_nonstat2(t_full, y_full, yerr_full, series_index, stds, args, planet_gue
     xbest_all = None
     best_bounds_list = None
     best_period_guess = None
+    best_C = None
 
     # One start per period guess (instead of the fixed A/B multi-start): the
     # planet A/B start at their generalised-least-squares values given the
@@ -565,10 +573,12 @@ def fit_nonstat2(t_full, y_full, yerr_full, series_index, stds, args, planet_gue
             xbest_all = xbest
             best_bounds_list = bounds_list
             best_period_guess = p
+            best_C = C
 
     diagnostics = {
         "at_bounds": at_bounds_params(xbest_all, best_bounds_list) if xbest_all is not None else [],
         "best_period_guess": best_period_guess,
+        "cov": best_C,
     }
     return xbest_all, best_loglike, diagnostics
 
@@ -579,131 +589,104 @@ def fit_nocyc(t_full, y_full, yerr_full, series_index, stds, args, planet_guess,
     xbest_all = None
     best_bounds_list = None
     best_period_guess = None
+    best_C = None
 
+    # One start per period guess: the planet A/B start at their generalised
+    # least-squares values given the starting GP and offsets (the fit itself
+    # runs on rescaled parameters, see mf.optimise_params)
     guesses = planet_guess if fit_planet else [None]
-    a_fracs = A_INIT_FRACS if fit_planet else [1.0]
-    b_fracs = B_INIT_FRACS if fit_planet else [1.0]
 
     for p in guesses:
         period_bounds = (max(p - 10, 1.1), min(p + 10, args.period_max)) if fit_planet else None
         bounds_list = build_bounds_list_nocyc(args, stds, period_bounds, amp_bound, fit_planet=fit_planet)
 
-        for Afrac in a_fracs:
-            for Bfrac in b_fracs:
-                C = cov.Cov(
-                    t_full,
-                    err=term.Error(yerr_full),
-                    rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
-                    rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
-                    rot=MultiSeriesKernel(term.MEPKernel(args.sig, args.prot, args.rho, args.eta), series_index,
-                                          np.array([stds[0], stds[1]]),
-                                          np.array([stds[0], 0.0])),
-                )
+        C = cov.Cov(
+            t_full,
+            err=term.Error(yerr_full),
+            rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
+            rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
+            rot=MultiSeriesKernel(term.MEPKernel(args.sig, args.prot, args.rho, args.eta), series_index,
+                                  np.array([stds[0], stds[1]]),
+                                  np.array([stds[0], 0.0])),
+        )
+        A0 = B0 = 0.0
+        if fit_planet:
+            resid = y_full.copy()
+            resid[series_index[0]] -= rv_offset0
+            resid[series_index[1]] -= rhk_offset0
+            A0, B0 = np.clip(mf.gls_planet_amplitudes(C, t_full, resid, series_index, p, rv_std),
+                             -amp_bound, amp_bound)
 
-                xbest, C = mf.optimise_params(
-                    t_full, y_full, series_index, C, bounds_list,
-                    delta_0=rv_offset0, delta_1=rhk_offset0,
-                    planet_p=(p if fit_planet else 40.05),
-                    planet_A=args.planet_A_fit * Afrac, planet_B=args.planet_B_fit * Bfrac,
-                    fit_planet=fit_planet, change_C=True,
-                )
+        xbest, C = mf.optimise_params(
+            t_full, y_full, series_index, C, bounds_list,
+            delta_0=rv_offset0, delta_1=rhk_offset0,
+            planet_p=(p if fit_planet else 40.05), planet_A=A0, planet_B=B0,
+            fit_planet=fit_planet, change_C=True,
+        )
 
-                loglike = -1 * mf.negloglike_nocyc(xbest, t_full, y_full, series_index, C, rv_std,
-                                                    inject_planet=fit_planet)[0]
+        loglike = -1 * mf.negloglike_nocyc(xbest, t_full, y_full, series_index, C, rv_std,
+                                            inject_planet=fit_planet)[0]
 
-                if loglike > best_loglike:
-                    best_loglike = loglike
-                    xbest_all = xbest
-                    best_bounds_list = bounds_list
-                    best_period_guess = p
+        if loglike > best_loglike:
+            best_loglike = loglike
+            xbest_all = xbest
+            best_bounds_list = bounds_list
+            best_period_guess = p
+            best_C = C
 
     diagnostics = {
         "at_bounds": at_bounds_params(xbest_all, best_bounds_list) if xbest_all is not None else [],
         "best_period_guess": best_period_guess,
+        "cov": best_C,
     }
     return xbest_all, best_loglike, diagnostics
 
 
 def make_row(period_idx, k_idx, phase_idx, period_inj, k_inj, phase_inj, A_inj, B_inj, mode,
-             xbest1, loglike1, diag1, xbest0, loglike0, diag0,
-             n_obs, t_crit, alpha_fpr, period_tolerance, k_tolerance, fit_error):
+             xbest, loglike, diag, period_tolerance, k_tolerance, fit_error):
     base = {
         "period_idx": period_idx, "k_idx": k_idx, "phase_idx": phase_idx,
         "period_inj": period_inj, "k_inj": k_inj, "phase_inj": phase_inj,
         "A_inj": A_inj, "B_inj": B_inj, "mode": mode,
-        "t_crit": t_crit, "alpha_fpr": alpha_fpr,
         "period_tolerance": period_tolerance, "k_tolerance": k_tolerance,
+        "gp_planet_at_bounds": ",".join(map(str, diag.get("at_bounds", []))) if diag else "",
     }
 
-    # t_crit is None only under --no-lr-test, where there is no GP-only fit
-    lr_test = t_crit is not None
-    loglike_nonfinite = int(not (xbest1 is not None and np.isfinite(loglike1)
-                                  and (not lr_test or (xbest0 is not None and np.isfinite(loglike0)))))
-
-    if loglike_nonfinite:
+    if xbest is None or not np.isfinite(loglike):
         base.update({
             "P_rec": float("nan"), "K_rec": float("nan"), "A_rec": float("nan"), "B_rec": float("nan"),
-            "best_loglike": loglike1 if xbest1 is not None else float("nan"),
-            "loglike_gp_only": loglike0 if xbest0 is not None else float("nan"),
-            "T_stat": float("nan"),
-            "bic_gp_only": float("nan"), "bic_gp_planet": float("nan"), "delta_bic": float("nan"),
-            "gp_planet_at_bounds": ",".join(map(str, diag1.get("at_bounds", []))) if diag1 else "",
-            "gp_only_at_bounds": ",".join(map(str, diag0.get("at_bounds", []))) if diag0 else "",
-            "loglike_nonfinite": 1, "nested_model_violation": 0,
-            "likelihood_ratio_pass": False, "param_match_pass": False, "recovered": 0,
+            "best_loglike": loglike if xbest is not None else float("nan"),
+            "loglike_nonfinite": 1, "param_match_pass": False, "recovered": 0,
             "diagnostic_flags": fit_error if fit_error else "loglike_nonfinite",
         })
         return base
 
-    P_rec, A_rec, B_rec = xbest1[-3], xbest1[-2], xbest1[-1]
+    P_rec, A_rec, B_rec = xbest[-3], xbest[-2], xbest[-1]
     K_rec = float(np.sqrt(A_rec ** 2 + B_rec ** 2))
 
-    k1 = len(xbest1)
-    bic1 = k1 * np.log(n_obs) - 2 * loglike1
-    if lr_test:
-        T_stat = 2.0 * (loglike1 - loglike0)
-        k0 = len(xbest0)
-        bic0 = k0 * np.log(n_obs) - 2 * loglike0
-        delta_bic = bic0 - bic1
-    else:
-        T_stat = bic0 = delta_bic = float("nan")
-
-    nested_model_violation = int(T_stat < 0)
-    likelihood_ratio_pass = bool(t_crit is not None and T_stat > t_crit)
     param_match_pass = bool(
         abs(P_rec - period_inj) / period_inj <= period_tolerance
         and abs(K_rec - k_inj) / k_inj <= k_tolerance
     )
-    recovered = int((likelihood_ratio_pass or not lr_test) and param_match_pass)
 
     flags = []
-    if nested_model_violation:
-        flags.append("nested_model_violation")
-    if diag1.get("at_bounds"):
+    if diag.get("at_bounds"):
         flags.append("gp_planet_at_bounds")
-    if diag0.get("at_bounds"):
-        flags.append("gp_only_at_bounds")
     if fit_error:
         flags.append(fit_error)
 
     base.update({
         "P_rec": P_rec, "K_rec": K_rec, "A_rec": A_rec, "B_rec": B_rec,
-        "best_loglike": loglike1, "loglike_gp_only": loglike0, "T_stat": T_stat,
-        "bic_gp_only": bic0, "bic_gp_planet": bic1, "delta_bic": delta_bic,
-        "gp_planet_at_bounds": ",".join(map(str, diag1.get("at_bounds", []))),
-        "gp_only_at_bounds": ",".join(map(str, diag0.get("at_bounds", []))),
-        "loglike_nonfinite": 0, "nested_model_violation": nested_model_violation,
-        "likelihood_ratio_pass": likelihood_ratio_pass, "param_match_pass": param_match_pass,
-        "recovered": recovered,
+        "best_loglike": loglike, "loglike_nonfinite": 0,
+        "param_match_pass": param_match_pass, "recovered": int(param_match_pass),
         "diagnostic_flags": ",".join(flags),
     })
     return base
 
 
-def run_one_combo(args_dict, period_idx, k_idx, phase_idx, period, k, seed, modes_needed):
-    args = argparse.Namespace(**{key: val for key, val in args_dict.items() if key != "_tcrit"})
-    tcrit_by_mode = args_dict.get("_tcrit", {})
-
+def prepare_injection(args, period, k, seed, modes_needed, log_prefix=""):
+    """Injects the planet into the data and computes everything the per-mode
+    fits share (warm starts, periodogram guesses)."""
     rng = np.random.default_rng(seed)
     phase = float(rng.uniform(0, 2 * np.pi))
     A_inj = k * np.cos(phase)
@@ -719,7 +702,6 @@ def run_one_combo(args_dict, period_idx, k_idx, phase_idx, period, k, seed, mode
         t_full, y_full, yerr_full, series_index = load_result
         rv_std = 1.0
 
-    n_obs = len(t_full)
     stds = [np.std(y_full[series_index[0]]), np.std(y_full[series_index[1]])]
     amp_bound = args.planet_amp_max if args.planet_amp_max is not None else 1.5 * args.k_max
 
@@ -735,8 +717,7 @@ def run_one_combo(args_dict, period_idx, k_idx, phase_idx, period, k, seed, mode
                 plot=False, print_results=False, return_fit=True,
             )
         except Exception as exc:
-            print(f"[combo p_idx={period_idx} k_idx={k_idx} phase_idx={phase_idx}] "
-                  f"cycle warm-start fit failed, falling back to raw seed: {exc}", flush=True)
+            print(f"{log_prefix} cycle warm-start fit failed, falling back to raw seed: {exc}", flush=True)
             cycle_params = fallback_cycle_seed(y_full, series_index, args)
 
     planet_guess, _ = mf.period_guess(
@@ -744,56 +725,51 @@ def run_one_combo(args_dict, period_idx, k_idx, phase_idx, period, k, seed, mode
         PMIN=1.1, PMAX=args.period_max, MAX_FAP=1e-5, MAX_NPL=2, plot=False,
     )
 
+    return {
+        "phase": phase, "A_inj": A_inj, "B_inj": B_inj,
+        "t_full": t_full, "y_full": y_full, "yerr_full": yerr_full, "series_index": series_index,
+        "rv_std": rv_std, "stds": stds, "amp_bound": amp_bound,
+        "cycle_params": cycle_params, "planet_guess": planet_guess,
+    }
+
+
+def fit_fn_and_args(mode, prep, args):
+    """The fit_* function for mode and its positional args (fit_planet is passed separately)."""
+    common = (prep["t_full"], prep["y_full"], prep["yerr_full"], prep["series_index"], prep["stds"], args,
+              prep["planet_guess"])
+    if mode in ("cyc", "nonstat", "nonstat2"):
+        fit_fn = {"cyc": fit_cyc, "nonstat": fit_nonstat, "nonstat2": fit_nonstat2}[mode]
+        return fit_fn, common + (prep["cycle_params"], prep["amp_bound"], prep["rv_std"])
+    if mode == "no_cycle":
+        rv_offset0 = float(np.mean(prep["y_full"][prep["series_index"][0]]))
+        rhk_offset0 = float(np.mean(prep["y_full"][prep["series_index"][1]]))
+        return fit_nocyc, common + (rv_offset0, rhk_offset0, prep["amp_bound"], prep["rv_std"])
+    raise ValueError(f"unknown mode {mode!r}")
+
+
+def run_one_combo(args_dict, period_idx, k_idx, phase_idx, period, k, seed, modes_needed):
+    args = argparse.Namespace(**args_dict)
+    log_prefix = f"[combo p_idx={period_idx} k_idx={k_idx} phase_idx={phase_idx}]"
+    prep = prepare_injection(args, period, k, seed, modes_needed, log_prefix)
+
     rows = []
     for mode in modes_needed:
-        if mode == "cyc":
-            fit_fn = fit_cyc
-            fit_args = (t_full, y_full, yerr_full, series_index, stds, args,
-                        planet_guess, cycle_params, amp_bound, rv_std)
-        elif mode == "nonstat":
-            fit_fn = fit_nonstat
-            fit_args = (t_full, y_full, yerr_full, series_index, stds, args,
-                        planet_guess, cycle_params, amp_bound, rv_std)
-        elif mode == "nonstat2":
-            fit_fn = fit_nonstat2
-            fit_args = (t_full, y_full, yerr_full, series_index, stds, args,
-                        planet_guess, cycle_params, amp_bound, rv_std)
-        elif mode == "no_cycle":
-            rv_offset0 = float(np.mean(y_full[series_index[0]]))
-            rhk_offset0 = float(np.mean(y_full[series_index[1]]))
-            fit_fn = fit_nocyc
-            fit_args = (t_full, y_full, yerr_full, series_index, stds, args,
-                        planet_guess, rv_offset0, rhk_offset0, amp_bound, rv_std)
-        else:
-            raise ValueError(f"unknown mode {mode!r}")
+        fit_fn, fit_args = fit_fn_and_args(mode, prep, args)
 
-        xbest1 = xbest0 = None
-        loglike1 = loglike0 = float("nan")
-        diag1 = diag0 = {"at_bounds": [], "best_period_guess": None}
-        errors = []
+        xbest = None
+        loglike = float("nan")
+        diag = {"at_bounds": [], "best_period_guess": None}
+        fit_error = None
 
         try:
-            xbest1, loglike1, diag1 = fit_fn(*fit_args, fit_planet=True)
+            xbest, loglike, diag = fit_fn(*fit_args, fit_planet=True)
         except Exception as exc:
-            errors.append(f"gp_planet_exception:{exc!r}")
-            print(f"[combo p_idx={period_idx} k_idx={k_idx} phase_idx={phase_idx} mode={mode}] "
-                  f"GP+planet fit failed: {exc}", flush=True)
+            fit_error = f"gp_planet_exception:{exc!r}"
+            print(f"{log_prefix} mode={mode} GP+planet fit failed: {exc}", flush=True)
 
-        if not args.no_lr_test:
-            try:
-                xbest0, loglike0, diag0 = fit_fn(*fit_args, fit_planet=False)
-            except Exception as exc:
-                errors.append(f"gp_only_exception:{exc!r}")
-                print(f"[combo p_idx={period_idx} k_idx={k_idx} phase_idx={phase_idx} mode={mode}] "
-                      f"GP-only fit failed: {exc}", flush=True)
-
-        t_crit_entry = tcrit_by_mode.get(mode, {})
         rows.append(make_row(
-            period_idx, k_idx, phase_idx, period, k, phase, A_inj, B_inj, mode,
-            xbest1, loglike1, diag1, xbest0, loglike0, diag0,
-            n_obs, t_crit_entry.get("t_crit"), t_crit_entry.get("alpha"),
-            args.period_tolerance, args.k_tolerance,
-            ";".join(errors) if errors else None,
+            period_idx, k_idx, phase_idx, period, k, prep["phase"], prep["A_inj"], prep["B_inj"], mode,
+            xbest, loglike, diag, args.period_tolerance, args.k_tolerance, fit_error,
         ))
 
     return rows
@@ -831,36 +807,10 @@ def load_completed_combos(csv_path):
     return modes_by_combo
 
 
-def load_tcrit(tcrit_path, requested_models):
-    """Loads {mode: {"t_crit":..., "alpha":...}} for the requested modes from
-    tcrit.json (written by null_calibration.py). Errors loudly rather than
-    falling back to any guessed/fixed threshold."""
-    if not os.path.exists(tcrit_path):
-        raise SystemExit(
-            f"--tcrit-path {tcrit_path} not found. Run null_calibration.py first to produce a "
-            f"calibrated detection threshold for mode(s) {sorted(requested_models)} before "
-            "running the injection-recovery sweep."
-        )
-    with open(tcrit_path) as f:
-        tcrit_data = json.load(f)
-
-    modes = tcrit_data.get("modes", {})
-    missing = requested_models - set(modes)
-    if missing:
-        raise SystemExit(
-            f"{tcrit_path} has no calibrated threshold for mode(s) {sorted(missing)}. "
-            "Run null_calibration.py for those modes first."
-        )
-    return {
-        mode: {"t_crit": modes[mode]["t_crit"], "alpha": tcrit_data.get("alpha")}
-        for mode in requested_models
-    }
-
-
 def run_resumable_pool(csv_path, csv_fields, tasks, worker_fn, n_workers, force_fresh=False):
     """Shared driver for a multiprocessing.Pool sweep whose per-task results
     (lists of row dicts) are streamed to a resumable, flush-per-row CSV.
-    Used by both injection_recovery.py and null_calibration.py so both scripts
+    Used by both injection_recovery.py and injection_recovery_mgic.py so both scripts
     share identical multiprocessing/resumability behaviour."""
     out_dir = os.path.dirname(csv_path)
     if out_dir:
@@ -914,20 +864,11 @@ def run_resumable_pool(csv_path, csv_fields, tasks, worker_fn, n_workers, force_
     print("Done.")
 
 
-def main_from_args(args):
+def main_from_args(args, csv_fields=CSV_FIELDS, worker_fn=None):
     requested_models = set(m.strip() for m in args.models.split(","))
     unknown = requested_models - {"cyc", "nonstat", "nonstat2", "no_cycle"}
     if unknown:
         raise SystemExit(f"--models: unknown model(s) {sorted(unknown)}; choose from cyc,nonstat,nonstat2,no_cycle")
-
-    tcrit_by_mode = {} if args.no_lr_test else load_tcrit(args.tcrit_path, requested_models)
-    if args.alpha is not None:
-        for mode, entry in tcrit_by_mode.items():
-            if entry["alpha"] is not None and not np.isclose(entry["alpha"], args.alpha):
-                raise SystemExit(
-                    f"--alpha {args.alpha} does not match the alpha={entry['alpha']} baked into "
-                    f"{args.tcrit_path} for mode {mode!r}."
-                )
 
     out_dir = os.path.dirname(args.output_csv)
     if out_dir:
@@ -957,14 +898,13 @@ def main_from_args(args):
           f"{len(remaining)} with outstanding modes.", flush=True)
 
     args_dict = vars(args).copy()
-    args_dict["_tcrit"] = tcrit_by_mode
     tasks = [
         (args_dict, pi, ki, phi, float(periods[pi]), float(ks[ki]),
          args.seed + pi * 1000 + ki * 10 + phi, modes_needed)
         for ((pi, ki, phi), modes_needed) in remaining
     ]
 
-    run_resumable_pool(args.output_csv, CSV_FIELDS, tasks, _worker, args.n_workers, force_fresh=False)
+    run_resumable_pool(args.output_csv, csv_fields, tasks, worker_fn or _worker, args.n_workers, force_fresh=False)
 
 
 def main():

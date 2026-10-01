@@ -9,8 +9,6 @@ underlying fraction (n_recovered/n_total).
 """
 
 import argparse
-import json
-import os
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -30,35 +28,19 @@ def build_parser():
                          help="Comma-separated explicit K bin edges (m/s), overrides --n-k-bins. Use this "
                               "to concentrate resolution in a region of interest, e.g. near the detection "
                               "threshold, rather than uniform log-spacing across the whole range.")
-    parser.add_argument("--tcrit-path", default="results/null_calibration/tcrit.json",
-                         help="Path to the tcrit.json produced by null_calibration.py, used to annotate "
-                              "each panel with that mode's calibrated T_crit and to build the summary table.")
     parser.add_argument("--summary-output", default="inj_rec/injection_recovery_summary.csv")
     return parser
 
 
-def load_tcrit_modes(tcrit_path):
-    if not os.path.exists(tcrit_path):
-        return None
-    with open(tcrit_path) as f:
-        return json.load(f)
-
-
-def write_summary_table(df, tcrit_data, output_path):
+def write_summary_table(df, output_path):
     rows = []
     for mode in ("cyc", "nonstat", "nonstat2", "no_cycle"):
         if mode not in df["mode"].unique():
             continue
         sub = df[df["mode"] == mode]
         recovery_fraction = sub["recovered"].mean() if len(sub) else float("nan")
-        mode_calib = (tcrit_data or {}).get("modes", {}).get(mode, {})
         rows.append({
             "gp_model": mode,
-            "n_null": mode_calib.get("n_null_requested"),
-            "fpr_target": (tcrit_data or {}).get("alpha"),
-            "t_crit": mode_calib.get("t_crit"),
-            "n_valid_null_fits": mode_calib.get("n_valid"),
-            "n_failed_null_fits": mode_calib.get("n_failed"),
             "injection_recovery_fraction": recovery_fraction,
         })
 
@@ -94,9 +76,7 @@ def binned_recovery(df, mode, period_edges, k_edges):
     return frac, n_recovered, n_total
 
 
-def plot_panel(ax, frac, n_recovered, n_total, period_edges, k_edges, title, t_crit=None):
-    if t_crit is not None:
-        title = f"{title} (T_crit={t_crit:.2f})"
+def plot_panel(ax, frac, n_recovered, n_total, period_edges, k_edges, title):
     cmap = plt.get_cmap("RdYlGn").copy()
     cmap.set_bad("white")
     masked = np.ma.masked_invalid(frac)
@@ -144,29 +124,29 @@ def main():
     mode_titles = {"cyc": "cyc", "nonstat": "nonstat", "nonstat2": "nonstat2", "no_cycle": "no cycle"}
     present_modes = [m for m in ("cyc", "nonstat", "nonstat2", "no_cycle") if m in df["mode"].unique()]
 
-    tcrit_data = load_tcrit_modes(args.tcrit_path)
-
     fig, axs = plt.subplots(1, len(present_modes), figsize=(7 * len(present_modes), 9), sharey=True)
     if len(present_modes) == 1:
         axs = [axs]
 
     for ax, mode in zip(axs, present_modes):
         frac, n_recovered, n_total = binned_recovery(df, mode, period_edges, k_edges)
-        t_crit = (tcrit_data or {}).get("modes", {}).get(mode, {}).get("t_crit")
-        im = plot_panel(ax, frac, n_recovered, n_total, period_edges, k_edges, mode_titles[mode], t_crit=t_crit)
+        im = plot_panel(ax, frac, n_recovered, n_total, period_edges, k_edges, mode_titles[mode])
 
     fig.colorbar(im, ax=axs, label="Recovered fraction", fraction=0.046, pad=0.02)
     axs[0].set_ylabel("K (m/s)")
 
     ptol = df["period_tolerance"].iloc[0] if "period_tolerance" in df.columns and len(df) else 0.10
     ktol = df["k_tolerance"].iloc[0] if "k_tolerance" in df.columns and len(df) else 0.15
-    fig.suptitle(f"Injection Recovery Grid (T_stat > T_crit[mode] at target FPR, AND "
+    # injection_recovery_mgic.py CSVs also require the planet model to be preferred
+    criterion = (f"dMGIC > {df['mgic_threshold'].iloc[0]:g} AND "
+                 if "mgic_threshold" in df.columns and len(df) else "")
+    fig.suptitle(f"Injection Recovery Grid ({criterion}"
                  f"within {ptol * 100:.0f}% in P / {ktol * 100:.0f}% in K)")
 
     plt.savefig(args.output, dpi=150)
     print(f"Saved {args.output}")
 
-    write_summary_table(df, tcrit_data, args.summary_output)
+    write_summary_table(df, args.summary_output)
 
 
 if __name__ == "__main__":
