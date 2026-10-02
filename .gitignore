@@ -6,3 +6,6 @@ __pycache__/
 *.npy
 *.csv
 *.json
+planet_finder_model/tests/*
+*.p
+*.sav
