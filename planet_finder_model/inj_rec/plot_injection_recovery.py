@@ -130,7 +130,10 @@ def main():
 
     for ax, mode in zip(axs, present_modes):
         frac, n_recovered, n_total = binned_recovery(df, mode, period_edges, k_edges)
-        im = plot_panel(ax, frac, n_recovered, n_total, period_edges, k_edges, mode_titles[mode])
+        title = mode_titles[mode]
+        if "mgic_threshold" in df.columns:
+            title += f" (dMGIC > {df.loc[df['mode'] == mode, 'mgic_threshold'].iloc[0]:.1f})"
+        im = plot_panel(ax, frac, n_recovered, n_total, period_edges, k_edges, title)
 
     fig.colorbar(im, ax=axs, label="Recovered fraction", fraction=0.046, pad=0.02)
     axs[0].set_ylabel("K (m/s)")
@@ -138,10 +141,12 @@ def main():
     ptol = df["period_tolerance"].iloc[0] if "period_tolerance" in df.columns and len(df) else 0.10
     ktol = df["k_tolerance"].iloc[0] if "k_tolerance" in df.columns and len(df) else 0.15
     # injection_recovery_mgic.py CSVs also require the planet model to be preferred
-    criterion = (f"dMGIC > {df['mgic_threshold'].iloc[0]:g} AND "
-                 if "mgic_threshold" in df.columns and len(df) else "")
+    criterion = "dMGIC > per-model threshold AND " if "mgic_threshold" in df.columns else ""
+    k_sigma = df["k_sigma"].dropna() if "k_sigma" in df.columns else []
+    k_text = (f"{ktol * 100:.0f}% or {k_sigma.iloc[0]:g} sigma_K in K" if len(k_sigma)
+              else f"{ktol * 100:.0f}% in K")
     fig.suptitle(f"Injection Recovery Grid ({criterion}"
-                 f"within {ptol * 100:.0f}% in P / {ktol * 100:.0f}% in K)")
+                 f"within {ptol * 100:.0f}% in P / {k_text})")
 
     plt.savefig(args.output, dpi=150)
     print(f"Saved {args.output}")

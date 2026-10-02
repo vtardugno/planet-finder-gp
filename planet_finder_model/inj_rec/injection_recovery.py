@@ -76,9 +76,10 @@ CSV_FIELDS = [
     "period_inj", "k_inj", "phase_inj", "A_inj", "B_inj",
     "mode", "P_rec", "K_rec", "A_rec", "B_rec",
     "best_loglike", "recovered",
-    "param_match_pass", "period_tolerance", "k_tolerance",
+    "param_match_pass", "period_tolerance", "k_tolerance", "k_sigma", "sigma_K_rec",
     # --- fit-quality diagnostics, recorded not discarded ---
     "gp_planet_at_bounds", "loglike_nonfinite",
+    "period_search", "period_guesses",
     "diagnostic_flags",
 ]
 
@@ -183,11 +184,25 @@ def build_parser():
     parser.add_argument("--force-fresh", action="store_true")
     parser.add_argument("--seed", type=int, default=12345)
 
+    # Planet period search: "periodogram" = Lomb-Scargle on the RVs (mf.period_guess),
+    # the same for every model; "gp" = scan of the likelihood gain of a sinusoid
+    # under each model's own GP-only fit, so the search uses the activity model
+    parser.add_argument("--period-search", choices=["periodogram", "gp"], default="periodogram")
+    parser.add_argument("--n-period-guesses", type=int, default=2,
+                         help="--period-search gp: number of periods (successively prewhitened "
+                              "scan peaks) used as planet-fit starts.")
+    parser.add_argument("--scan-oversample", type=float, default=5.0,
+                         help="--period-search gp: frequency samples per 1/baseline.")
+
     # Recovery criterion
     parser.add_argument("--period-tolerance", type=float, default=0.10,
                          help="Relative tolerance for the recovered-period parameter-match test.")
     parser.add_argument("--k-tolerance", type=float, default=0.15,
                          help="Relative tolerance for the recovered-K parameter-match test.")
+    parser.add_argument("--k-sigma", type=float, default=None,
+                         help="If given, the K test also passes when |K_rec - K_inj| <= k_sigma * "
+                              "sigma_K (sigma_K of the planet's linear A/B fit at the best-fit P and "
+                              "GP), i.e. the looser of this and --k-tolerance.")
 
     return parser
 
@@ -642,13 +657,113 @@ def fit_nocyc(t_full, y_full, yerr_full, series_index, stds, args, planet_guess,
     return xbest_all, best_loglike, diagnostics
 
 
+def residual(mode, x, C, prep, fit_planet):
+    """y minus the mode's mean model at x (mirrors the negloglike_* mean blocks)."""
+    t_full, series_index = prep["t_full"], prep["series_index"]
+    t_rv, t_act = t_full[series_index[0]], t_full[series_index[1]]
+    resid = prep["y_full"].copy()
+
+    if fit_planet:
+        resid[series_index[0]] -= mf.planet_injection(t_rv, x[-3], x[-2], x[-1]) / prep["rv_std"]
+
+    if mode == "no_cycle":
+        resid[series_index[0]] -= x[8]
+        resid[series_index[1]] -= x[9]
+        return resid
+
+    if mode == "cyc":
+        b, P, phi = x[8], x[9], x[10]
+        n = 11
+        core_rv, core_act = mf.shared_core(t_rv, b, P, phi), mf.shared_core(t_act, b, P, phi)
+    elif mode == "nonstat":
+        b, P, phi = C.get_param(["rot.nonstat_b", "rot.nonstat_P", "rot.nonstat_phi"])
+        n = len(mfn.get_opt_params_nonstat(C)[0])
+        core_rv, core_act = mfn.shared_core(t_rv, b, P, phi), mfn.shared_core(t_act, b, P, phi)
+    elif mode == "nonstat2":
+        b, P, phi, c = C.get_param(["rot.nonstat_b", "rot.nonstat_P", "rot.nonstat_phi", "rot.nonstat_c"])
+        n = len(mfn2.get_opt_params_nonstat(C)[0])
+        T = np.max(t_full)
+        core_rv = mfn2.shared_core_pos(t_rv, b, P, phi, c, T)
+        core_act = mfn2.shared_core_pos(t_act, b, P, phi, c, T)
+    else:
+        raise ValueError(f"unknown mode {mode!r}")
+
+    a0, a1, d0, d1 = x[n], x[n + 1], x[n + 2], x[n + 3]
+    resid[series_index[0]] -= a0 * core_rv + d0
+    resid[series_index[1]] -= a1 * core_act + d1
+    return resid
+
+
+def whiten(C, v):
+    """C's Cholesky factor applied as L^-1 v / sqrt(D), as in mf.gls_planet_amplitudes."""
+    return C.solveL(v, copy=True) / C.sqD()
+
+
+def whitened_sinusoid(C, t_full, series_index, rv_std, p):
+    """Whitened sin and cos design columns (RV series only) of a planet at period p."""
+    arg = 2 * np.pi * t_full[series_index[0]] / (p + 0.000001)
+    x = np.zeros(len(t_full))
+    x[series_index[0]] = np.sin(arg) / rv_std
+    xs = whiten(C, x)
+    x[series_index[0]] = np.cos(arg) / rv_std
+    return xs, whiten(C, x)
+
+
+def gp_period_scan(C, t_full, resid, series_index, rv_std, periods):
+    """Likelihood gain (delta chi^2) of the best-fit sinusoid A sin + B cos at
+    each period, under covariance C: whiten with C's Cholesky factor, then
+    generalised least squares."""
+    rw = whiten(C, resid)
+    dchi2 = np.empty(len(periods))
+    for i, p in enumerate(periods):
+        xs, xc = whitened_sinusoid(C, t_full, series_index, rv_std, p)
+        G = np.array([[xs @ xs, xs @ xc], [xs @ xc, xc @ xc]])
+        b = np.array([xs @ rw, xc @ rw])
+        dchi2[i] = b @ np.linalg.solve(G, b)
+    return dchi2
+
+
+def planet_sigma_K(fit, prep):
+    """Standard error of K_rec = hypot(A, B) for a GP+planet fit_* result, from
+    the A/B generalised-least-squares covariance (X^T K^-1 X)^-1 at the
+    best-fit P and GP hyperparameters (so it ignores their uncertainty)."""
+    if fit is None or fit[0] is None or not np.isfinite(fit[1]):
+        return float("nan")
+    xbest, _, diag = fit
+    P, A, B = xbest[-3], xbest[-2], xbest[-1]
+    xs, xc = whitened_sinusoid(diag["cov"], prep["t_full"], prep["series_index"], prep["rv_std"], P)
+    cov_AB = np.linalg.inv(np.array([[xs @ xs, xs @ xc], [xs @ xc, xc @ xc]]))
+    g = np.array([A, B]) / np.hypot(A, B)
+    return float(np.sqrt(g @ cov_AB @ g))
+
+
+def gp_period_guesses(C, resid, prep, args):
+    """Planet-fit starting periods from successively prewhitened gp_period_scan
+    peaks, C being a GP-only fit and resid its mean-model residual."""
+    t_full, series_index, rv_std = prep["t_full"], prep["series_index"], prep["rv_std"]
+    baseline = np.ptp(t_full)
+    freqs = np.arange(1.0 / args.period_max, 1.0 / 1.1, 1.0 / (args.scan_oversample * baseline))
+    periods = 1.0 / freqs
+
+    resid = resid.copy()
+    guesses = []
+    for _ in range(args.n_period_guesses):
+        p = float(periods[np.argmax(gp_period_scan(C, t_full, resid, series_index, rv_std, periods))])
+        guesses.append(p)
+        A, B = mf.gls_planet_amplitudes(C, t_full, resid, series_index, p, rv_std)
+        resid[series_index[0]] -= mf.planet_injection(t_full[series_index[0]], p, A, B) / rv_std
+    return guesses
+
+
 def make_row(period_idx, k_idx, phase_idx, period_inj, k_inj, phase_inj, A_inj, B_inj, mode,
-             xbest, loglike, diag, period_tolerance, k_tolerance, fit_error):
+             xbest, loglike, diag, period_tolerance, k_tolerance, fit_error,
+             sigma_K=float("nan"), k_sigma=None):
     base = {
         "period_idx": period_idx, "k_idx": k_idx, "phase_idx": phase_idx,
         "period_inj": period_inj, "k_inj": k_inj, "phase_inj": phase_inj,
         "A_inj": A_inj, "B_inj": B_inj, "mode": mode,
         "period_tolerance": period_tolerance, "k_tolerance": k_tolerance,
+        "k_sigma": k_sigma, "sigma_K_rec": sigma_K,
         "gp_planet_at_bounds": ",".join(map(str, diag.get("at_bounds", []))) if diag else "",
     }
 
@@ -664,10 +779,12 @@ def make_row(period_idx, k_idx, phase_idx, period_inj, k_inj, phase_inj, A_inj, 
     P_rec, A_rec, B_rec = xbest[-3], xbest[-2], xbest[-1]
     K_rec = float(np.sqrt(A_rec ** 2 + B_rec ** 2))
 
-    param_match_pass = bool(
-        abs(P_rec - period_inj) / period_inj <= period_tolerance
-        and abs(K_rec - k_inj) / k_inj <= k_tolerance
-    )
+    # with k_sigma, whichever of the two K bounds is looser: the sigma_K one near
+    # the detection limit, the fractional one at high K where sigma_K/K is tiny
+    k_match = abs(K_rec - k_inj) / k_inj <= k_tolerance
+    if k_sigma is not None:
+        k_match = k_match or abs(K_rec - k_inj) <= k_sigma * sigma_K
+    param_match_pass = bool(abs(P_rec - period_inj) / period_inj <= period_tolerance and k_match)
 
     flags = []
     if diag.get("at_bounds"):
@@ -720,10 +837,12 @@ def prepare_injection(args, period, k, seed, modes_needed, log_prefix=""):
             print(f"{log_prefix} cycle warm-start fit failed, falling back to raw seed: {exc}", flush=True)
             cycle_params = fallback_cycle_seed(y_full, series_index, args)
 
-    planet_guess, _ = mf.period_guess(
-        t_full, y_full, yerr_full, series_index,
-        PMIN=1.1, PMAX=args.period_max, MAX_FAP=1e-5, MAX_NPL=2, plot=False,
-    )
+    planet_guess = None
+    if args.period_search == "periodogram":
+        planet_guess, _ = mf.period_guess(
+            t_full, y_full, yerr_full, series_index,
+            PMIN=1.1, PMAX=args.period_max, MAX_FAP=1e-5, MAX_NPL=2, plot=False,
+        )
 
     return {
         "phase": phase, "A_inj": A_inj, "B_inj": B_inj,
@@ -733,10 +852,12 @@ def prepare_injection(args, period, k, seed, modes_needed, log_prefix=""):
     }
 
 
-def fit_fn_and_args(mode, prep, args):
+def fit_fn_and_args(mode, prep, args, planet_guess=None):
     """The fit_* function for mode and its positional args (fit_planet is passed separately)."""
+    if planet_guess is None:
+        planet_guess = prep["planet_guess"]
     common = (prep["t_full"], prep["y_full"], prep["yerr_full"], prep["series_index"], prep["stds"], args,
-              prep["planet_guess"])
+              planet_guess)
     if mode in ("cyc", "nonstat", "nonstat2"):
         fit_fn = {"cyc": fit_cyc, "nonstat": fit_nonstat, "nonstat2": fit_nonstat2}[mode]
         return fit_fn, common + (prep["cycle_params"], prep["amp_bound"], prep["rv_std"])
@@ -747,6 +868,39 @@ def fit_fn_and_args(mode, prep, args):
     raise ValueError(f"unknown mode {mode!r}")
 
 
+def fit_mode(mode, prep, args, gp_only=False, log_prefix=""):
+    """GP+planet fit of mode (and its GP-only fit, if gp_only or the period
+    search needs it). Returns (fit_planet, fit_gp_only, errors, period_guesses),
+    each fit being a fit_* (xbest, loglike, diag) tuple or None if it failed."""
+    fit_fn, fit_args = fit_fn_and_args(mode, prep, args)
+    errors = []
+    fit0 = fit1 = None
+
+    if gp_only or args.period_search == "gp":
+        try:
+            fit0 = fit_fn(*fit_args, fit_planet=False)
+        except Exception as exc:
+            errors.append(f"gp_only_exception:{exc!r}")
+            print(f"{log_prefix} mode={mode} GP-only fit failed: {exc}", flush=True)
+
+    guesses = prep["planet_guess"]
+    if args.period_search == "gp":
+        if fit0 is None:
+            return None, None, errors, None
+        xbest0, _, diag0 = fit0
+        resid0 = residual(mode, xbest0, diag0["cov"], prep, fit_planet=False)
+        guesses = gp_period_guesses(diag0["cov"], resid0, prep, args)
+        fit_fn, fit_args = fit_fn_and_args(mode, prep, args, guesses)
+
+    try:
+        fit1 = fit_fn(*fit_args, fit_planet=True)
+    except Exception as exc:
+        errors.append(f"gp_planet_exception:{exc!r}")
+        print(f"{log_prefix} mode={mode} GP+planet fit failed: {exc}", flush=True)
+
+    return fit1, fit0, errors, guesses
+
+
 def run_one_combo(args_dict, period_idx, k_idx, phase_idx, period, k, seed, modes_needed):
     args = argparse.Namespace(**args_dict)
     log_prefix = f"[combo p_idx={period_idx} k_idx={k_idx} phase_idx={phase_idx}]"
@@ -754,25 +908,24 @@ def run_one_combo(args_dict, period_idx, k_idx, phase_idx, period, k, seed, mode
 
     rows = []
     for mode in modes_needed:
-        fit_fn, fit_args = fit_fn_and_args(mode, prep, args)
+        fit1, _, errors, guesses = fit_mode(mode, prep, args, log_prefix=log_prefix)
+        xbest, loglike, diag = fit1 or (None, float("nan"), {"at_bounds": []})
 
-        xbest = None
-        loglike = float("nan")
-        diag = {"at_bounds": [], "best_period_guess": None}
-        fit_error = None
-
-        try:
-            xbest, loglike, diag = fit_fn(*fit_args, fit_planet=True)
-        except Exception as exc:
-            fit_error = f"gp_planet_exception:{exc!r}"
-            print(f"{log_prefix} mode={mode} GP+planet fit failed: {exc}", flush=True)
-
-        rows.append(make_row(
+        row = make_row(
             period_idx, k_idx, phase_idx, period, k, prep["phase"], prep["A_inj"], prep["B_inj"], mode,
-            xbest, loglike, diag, args.period_tolerance, args.k_tolerance, fit_error,
-        ))
+            xbest, loglike, diag, args.period_tolerance, args.k_tolerance,
+            ";".join(errors) if errors else None,
+            sigma_K=planet_sigma_K(fit1, prep), k_sigma=args.k_sigma,
+        )
+        row.update(period_search_columns(args, guesses))
+        rows.append(row)
 
     return rows
+
+
+def period_search_columns(args, guesses):
+    return {"period_search": args.period_search,
+            "period_guesses": ";".join(f"{p:.4f}" for p in guesses) if guesses is not None else ""}
 
 
 def _worker(task):
