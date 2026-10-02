@@ -485,6 +485,43 @@ def gls_planet_amplitudes(C, t_full, resid, series_index, p, rv_std=1.0):
     AB, *_ = np.linalg.lstsq(Xw, whiten(resid), rcond=None)
     return AB
 
+def gp_period_scan(C, t_full, resid, series_index, periods, rv_std=1.0):
+    """Likelihood gain (delta chi^2) of the best-fit sinusoid A sin + B cos at
+    each period, under covariance C: whiten with C's Cholesky factor, then
+    generalised least squares."""
+    def whiten(v):
+        return C.solveL(v, copy=True) / C.sqD()
+
+    rw = whiten(resid)
+    x = np.zeros(len(t_full))
+    dchi2 = np.empty(len(periods))
+    for i, p in enumerate(periods):
+        arg = 2 * np.pi * t_full[series_index[0]] / (p + 0.000001)
+        x[series_index[0]] = np.sin(arg) / rv_std
+        xs = whiten(x)
+        x[series_index[0]] = np.cos(arg) / rv_std
+        xc = whiten(x)
+        G = np.array([[xs @ xs, xs @ xc], [xs @ xc, xc @ xc]])
+        b = np.array([xs @ rw, xc @ rw])
+        dchi2[i] = b @ np.linalg.solve(G, b)
+    return dchi2
+
+
+def gp_period_guesses(C, t_full, resid, series_index, rv_std=1.0, PMIN=1.1, PMAX=400.0, n_guesses=2, oversample=5.0):
+    """Planet-fit starting periods from successively prewhitened gp_period_scan
+    peaks, C being a GP-only fit and resid its mean-model residual."""
+    freqs = np.arange(1.0 / PMAX, 1.0 / PMIN, 1.0 / (oversample * np.ptp(t_full)))
+    periods = 1.0 / freqs
+
+    resid = resid.copy()
+    guesses = []
+    for _ in range(n_guesses):
+        p = float(periods[np.argmax(gp_period_scan(C, t_full, resid, series_index, periods, rv_std))])
+        guesses.append(p)
+        A, B = gls_planet_amplitudes(C, t_full, resid, series_index, p, rv_std)
+        resid[series_index[0]] -= planet_injection(t_full[series_index[0]], p, A, B) / rv_std
+    return guesses
+
 
 def optimise_params_cyc(t_full, y_full, series_index, C, bounds_list, b = 0.0, P = 4000, phi = 0.0, a0 = None, a1 = None, d0 = None, d1 = None, planet_p = 40.05, planet_A = 0.0005, planet_B = 0.0, fit_planet = True, change_C = True):
 

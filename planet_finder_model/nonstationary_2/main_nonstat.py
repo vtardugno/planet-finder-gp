@@ -73,6 +73,13 @@ def build_parser():
     # Optimisation / MCMC
     parser.add_argument("--run-mcmc", action=argparse.BooleanOptionalAction, default=False, help="Run MCMC after optimisation")
     parser.add_argument("--planet-p", type=float, default=None, help="Initial planet period")
+    # Planet period search (ignored if --planet-p is given): "periodogram" = Lomb-Scargle
+    # on the RVs; "gp" = scan of the likelihood gain of a sinusoid under the model's own
+    # GP-only fit (same as inj_rec/injection_recovery.py --period-search)
+    parser.add_argument("--period-search", choices=["periodogram", "gp"], default="periodogram")
+    parser.add_argument("--search-period-min", type=float, default=1.1, help="Shortest planet period searched and allowed in the planet fit")
+    parser.add_argument("--n-period-guesses", type=int, default=2, help="--period-search gp: number of periods (successively prewhitened scan peaks) used as planet-fit starts")
+    parser.add_argument("--scan-oversample", type=float, default=5.0, help="--period-search gp: frequency samples per 1/baseline")
     parser.add_argument("--fit-planet", action=argparse.BooleanOptionalAction, default=True, help="Include planet parameters in the optimisation")
     parser.add_argument("--change-C", action=argparse.BooleanOptionalAction, default=True, help="Write the optimised kernel parameters back into C")
     parser.add_argument("--run-length", type=int, default=3000, help="Number of MCMC steps")
@@ -190,20 +197,54 @@ def main():
         xbest_all = []
         best_p_init = 0
 
-        if args.planet_p is None:
-            periodogram_out_name = "results_nonstat/periodogram_" + args.output_name + ".png"
-            planet_guess, _ = mf.period_guess(t_full, y_full, yerr_full, series_index, PMIN = 1.1, PMAX = 400.0, MAX_FAP = 1e-5, MAX_NPL = 2, plot = True, output_name = periodogram_out_name)
-        else:
+        if args.planet_p is not None:
             planet_guess = [args.planet_p]
+        elif args.period_search == "periodogram":
+            periodogram_out_name = "results_nonstat/periodogram_" + args.output_name + ".png"
+            planet_guess, _ = mf.period_guess(t_full, y_full, yerr_full, series_index, PMIN = args.search_period_min, PMAX = 400.0, MAX_FAP = 1e-5, MAX_NPL = 2, plot = True, output_name = periodogram_out_name)
+        else:
+            # GP-only fit, then scan its mean-model residual under its covariance
+            C0 = cov.Cov(
+            t_full,
+            err=term.Error(yerr_full),
+            rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
+            rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
+            rot = term.SimpleProductKernel(
+                    nonstat=mf.make_nonstat_kernel(T, b0, P0, phi0, c0),
+                    qp=MultiSeriesKernel(term.MEPKernel(args.sig,args.prot,args.rho,args.eta), series_index,
+                            qp_amps0,
+                            qp_beta0
+                        ),
+                ),
+            )
+            x0, C0 = mf.optimise_params_nonstat(t_full, y_full, series_index, C0, bounds_list[:-3],
+                                        a0=rv_amp0,
+                                        a1=rhk_amp0,
+                                        d0=rv_offset0,
+                                        d1=rhk_offset0,
+                                        fit_planet=False,
+                                        change_C=True)
+
+            n = len(mf.get_opt_params_nonstat(C0)[0])
+            a0, a1, d0, d1 = x0[n:n + 4]
+            b, P, phi, c = C0.get_param(["rot.nonstat_b", "rot.nonstat_P", "rot.nonstat_phi", "rot.nonstat_c"])
+            resid0 = y_full.copy()
+            resid0[series_index[0]] -= a0 * mf.shared_core_pos(t_full[series_index[0]], b, P, phi, c, T) + d0
+            resid0[series_index[1]] -= a1 * mf.shared_core_pos(t_full[series_index[1]], b, P, phi, c, T) + d1
+
+            planet_guess = mf.gp_period_guesses(C0, t_full, resid0, series_index, rv_std,
+                                                PMIN=args.search_period_min, PMAX=400.0,
+                                                n_guesses=args.n_period_guesses, oversample=args.scan_oversample)
+        print("Planet period guesses:", planet_guess)
 
         for p in planet_guess:
 
             if args.planet_p_min is None:
-                args.planet_p_min = np.max([p - 10, 1.1])
+                args.planet_p_min = np.max([p - 10, args.search_period_min])
             if args.planet_p_max is None:
                 args.planet_p_max = np.min([p + 10, 400.0])
 
-            bounds_list[-3] = (np.max([p - 10, 1.1]), np.min([p + 10, 400.0]))
+            bounds_list[-3] = (np.max([p - 10, args.search_period_min]), np.min([p + 10, 400.0]))
 
             C = cov.Cov(
             t_full,
@@ -291,7 +332,7 @@ def main():
     if args.run_mcmc:
 
         if args.fit_planet:
-            bounds_list[-3] = (np.max([best_p_init - 10, 1.1]), np.min([best_p_init + 10, 400.0]))
+            bounds_list[-3] = (np.max([best_p_init - 10, args.search_period_min]), np.min([best_p_init + 10, 400.0]))
 
         sampler = mf.run_emcee_nonstat(t_full, y_full, series_index, C, xbest_all, bounds_list, run_length=args.run_length, planet=args.fit_planet)
 
