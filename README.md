@@ -1,19 +1,29 @@
 # stellar_activity_gp
 
 Modelling stellar activity (RV + RHK) with Gaussian Processes to recover injected/real planetary
-signals. Several modelling approaches live here; `planet_finder_model/main.py` + `functions.py`
-is the current working model.
+signals. Several modelling approaches live here; the current working models are the
+pipeline-2 model folders in `planet_finder_model/` together with `planet_finder_model/inj_rec/`.
 
 ## Layout
 
 ```
-planet_finder_model/     current working model (stationary multi-series GP kernel)
-  main.py                 CLI entry point: load data -> fit cycle -> fit GP (+ planet) -> MCMC
-  functions.py             data loading, cycle fit, likelihoods, optimisation, plotting
-  CV.py                    12-fold cross-validation + full-dataset AIC/BIC model comparison
+planet_finder_model/     current working models (see "planet_finder_model concepts" below)
+  cyc_pipeline2/           cyc + no_cycle models (no_cycle = --no-fit-cycle)
+    functions.py            model functions
+    main_cycle_likelihood.py  single-dataset fit
+  nonstationary/nonstationary_pipeline2/   nonstat model (functions_nonstat.py, main_nonstat.py)
+  nonstationary_2/         nonstat2 model (functions_nonstat.py, main_nonstat.py)
+  inj_rec/                 injection-recovery sweeps, MGIC calibration, plots, diagnostics
+  CV/CV_pipeline2.py       12-fold CV comparing all four models
+  pool_results.py          merge injection-recovery CSVs
+  tests/                   pytest for inj_rec + MGIC
   data/                    Solar_Data/, HD4628/ input time series
-  results/                 saved fits (xbest, sampler, map_params .npy)
-  notebooks/               exploratory notebook (functions.py-based)
+  results/                 saved fits, mgic_calibration/ thresholds
+
+  legacy (pipeline 1, kept for reference):
+                           functions.py, main_cycle_likelihood.py, nonstationary/*.py,
+                           CV/CV.py, CV/CV_nonstat.py, CV/CV_nonstat_2.py, plot_map.py,
+                           old_model/ (fits the cycle first, then the GP), notebooks/
 
   multigp_cycle_variant/   alternative model: stationary kernel + a warped-sine cyclic
                            term added to the *mean* (not the covariance) -- a parallel
@@ -71,27 +81,53 @@ non_stationary_gp/        the true non-stationary GP kernel: covariance is
 archive/pyaneti_stuff/    old pyaneti MCMC test runs, kept for reference only
 ```
 
+## planet_finder_model concepts
+
+**Models** (all fit RV + log R'HK jointly with a multi-series GP):
+- `cyc`: stationary GP + activity cycle (b·t + sin) in the mean.
+- `no_cycle`: stationary GP, no cycle term (`--no-fit-cycle`, same code as cyc).
+- `nonstat`: cycle in the mean, GP variance modulated by exp(mu · cycle).
+- `nonstat2`: the same cycle function scales both the mean and the GP variance (no exp).
+
+**Pipelines**: pipeline 1 (legacy) fits from fixed starts; pipeline 2 seeds the planet
+A/B by generalised least squares and rescales parameters before optimising. All current
+scripts use pipeline 2.
+
+**Period search** (`inj_rec/injection_recovery.py --period-search`):
+- `periodogram`: Lomb-Scargle on the RVs; for each significant peak (FAP < 1e-5, max 2),
+  refit RV linearly on log R'HK + all sinusoids found so far and search the residuals.
+  The guesses are the same for every model.
+- `gp`: fit each model GP-only, then scan periods for the likelihood gain of a sinusoid
+  under that GP (A, B by generalised least squares); take the top peak, prewhiten, repeat
+  (`--n-period-guesses`, default 2).
+
+Either way, each guess seeds a full GP+planet fit and the best log-likelihood is kept.
+
+**Recovery criteria**:
+- `injection_recovery.py`: P within 10% and K within 15% of the injected values
+  (`--k-sigma`: K also passes within k·σ_K).
+- `injection_recovery_mgic.py`: additionally requires ΔMGIC_rv (GP-only minus GP+planet)
+  > threshold. The threshold is either fixed (`--mgic-threshold`) or set per model by
+  `mgic_calibration.py` on the uninjected Sun (`--mgic-threshold-path`). `rescore_mgic.py`
+  re-applies thresholds to an existing CSV without refitting.
+
 ## Workflow
 
 1. **Data**: RV + RHK (activity indicator) time series per star, stored as
    `Analyse_summary.csv` / `Analyse_ccf.p` under a `data/<Star>/` folder.
-2. **Cycle removal**: `functions.fit_cycle` fits and subtracts a shared long-term
-   activity cycle from RV and RHK before GP fitting (`--cycle-fit`, on by default).
-3. **GP fit**: a multi-series GP kernel (`spleaf`) is fit jointly to RV and RHK to model
-   correlated stellar activity, optionally with an injected/candidate planet signal
-   (`--fit-planet`, `--planet-*` args).
-4. **Optimisation + MCMC**: `main.py` optimises the GP hyperparameters (multiple planet
-   amplitude/phase initial guesses, best log-likelihood kept), then runs `emcee` for
-   posterior sampling, saving corner plots and MAP parameters to `results/`.
-5. **Cross-validation + model comparison**: `CV.py` runs a 12-fold CV comparing
-   cycle-removed vs. non-cycle-removed fits (per-fold results in `results/cv_results.csv`),
-   and separately reports full-dataset AIC/BIC for the same comparison.
+2. **Fit**: `cyc_pipeline2/main_cycle_likelihood.py`, `nonstationary/nonstationary_pipeline2/main_nonstat.py`
+   and `nonstationary_2/main_nonstat.py` fit one dataset (GP + planet by default, `--no-fit-planet` for GP only;
+   optionally MCMC, `--run-mcmc`).
+3. **Model comparison**: `CV/CV_pipeline2.py` runs a 12-fold CV across the four models.
+4. **Injection-recovery**: `inj_rec/injection_recovery[_mgic].py` sweeps a period × K grid;
+   `inj_rec/plot_injection_recovery.py` plots the recovery fractions.
 
-Run the current model with, e.g.:
+Run from `planet_finder_model/`, e.g.:
 
 ```bash
-cd planet_finder_model
-python main.py --path "data/Solar_Data" --star-name Sun --fit-planet --run-mcmc
+python cyc_pipeline2/main_cycle_likelihood.py --path data/Solar_Data --star-name Sun
+python inj_rec/injection_recovery_mgic.py --models cyc,nonstat,nonstat2,no_cycle --period-search gp \
+    --mgic-threshold-path results/mgic_calibration/mgic_threshold_gpsearch.json
 ```
 
 `non_stationary_gp/` explores replacing the stationary kernel with a genuinely
