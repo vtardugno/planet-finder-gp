@@ -16,13 +16,12 @@ number of degrees of freedom of the GP smoother on the RVs.
 """
 
 import argparse
+import json
 
 import numpy as np
 from scipy.linalg import cho_factor, cho_solve
 
 import injection_recovery as ir
-
-mf, mfn, mfn2 = ir.mf, ir.mfn, ir.mfn2
 
 
 CSV_FIELDS = ir.CSV_FIELDS + [
@@ -40,7 +39,21 @@ def build_parser():
     parser.add_argument("--mgic-threshold", type=float, default=10.0,
                          help="Minimum MGIC_rv(GP-only) - MGIC_rv(GP+planet) for the planet model "
                               "to count as preferred (10 = 'strong' on the AIC scale).")
+    parser.add_argument("--mgic-threshold-path", default=None,
+                         help="mgic_threshold.json from mgic_calibration.py; its per-model thresholds "
+                              "override --mgic-threshold.")
     return parser
+
+
+def load_mgic_thresholds(path, modes):
+    """{mode: threshold} from a mgic_calibration.py JSON, for every mode in modes."""
+    with open(path) as f:
+        entries = json.load(f)["modes"]
+    missing = set(modes) - set(entries)
+    if missing:
+        raise SystemExit(f"{path} has no MGIC threshold for mode(s) {sorted(missing)}; "
+                         "run mgic_calibration.py for them first.")
+    return {mode: entries[mode]["threshold"] for mode in modes}
 
 
 def expand_cov(C):
@@ -85,41 +98,10 @@ def mgic_rv(C, resid, series_index, yerr_full, n_params):
     return -2.0 * lnL_cond + 2.0 * (n_params + K_s), lnL_cond, K_s
 
 
-def residual(mode, x, C, prep, fit_planet):
-    """y minus the mode's mean model at x (mirrors the negloglike_* mean blocks)."""
-    t_full, series_index = prep["t_full"], prep["series_index"]
-    t_rv, t_act = t_full[series_index[0]], t_full[series_index[1]]
-    resid = prep["y_full"].copy()
-
-    if fit_planet:
-        resid[series_index[0]] -= mf.planet_injection(t_rv, x[-3], x[-2], x[-1]) / prep["rv_std"]
-
-    if mode == "no_cycle":
-        resid[series_index[0]] -= x[8]
-        resid[series_index[1]] -= x[9]
-        return resid
-
-    if mode == "cyc":
-        b, P, phi = x[8], x[9], x[10]
-        n = 11
-        core_rv, core_act = mf.shared_core(t_rv, b, P, phi), mf.shared_core(t_act, b, P, phi)
-    elif mode == "nonstat":
-        b, P, phi = C.get_param(["rot.nonstat_b", "rot.nonstat_P", "rot.nonstat_phi"])
-        n = len(mfn.get_opt_params_nonstat(C)[0])
-        core_rv, core_act = mfn.shared_core(t_rv, b, P, phi), mfn.shared_core(t_act, b, P, phi)
-    elif mode == "nonstat2":
-        b, P, phi, c = C.get_param(["rot.nonstat_b", "rot.nonstat_P", "rot.nonstat_phi", "rot.nonstat_c"])
-        n = len(mfn2.get_opt_params_nonstat(C)[0])
-        T = np.max(t_full)
-        core_rv = mfn2.shared_core_pos(t_rv, b, P, phi, c, T)
-        core_act = mfn2.shared_core_pos(t_act, b, P, phi, c, T)
-    else:
-        raise ValueError(f"unknown mode {mode!r}")
-
-    a0, a1, d0, d1 = x[n], x[n + 1], x[n + 2], x[n + 3]
-    resid[series_index[0]] -= a0 * core_rv + d0
-    resid[series_index[1]] -= a1 * core_act + d1
-    return resid
+def fit_mgic(mode, xbest, diag, prep, fit_planet):
+    """(MGIC_rv, ln L'_rv, K_s) of one fit_* result."""
+    resid = ir.residual(mode, xbest, diag["cov"], prep, fit_planet)
+    return mgic_rv(diag["cov"], resid, prep["series_index"], prep["yerr_full"], len(xbest))
 
 
 def run_one_combo(args_dict, period_idx, k_idx, phase_idx, period, k, seed, modes_needed):
@@ -129,24 +111,15 @@ def run_one_combo(args_dict, period_idx, k_idx, phase_idx, period, k, seed, mode
 
     rows = []
     for mode in modes_needed:
-        fit_fn, fit_args = ir.fit_fn_and_args(mode, prep, args)
-
-        fits = {}
-        errors = []
-        for fit_planet, label in ((True, "gp_planet"), (False, "gp_only")):
-            try:
-                fits[fit_planet] = fit_fn(*fit_args, fit_planet=fit_planet)
-            except Exception as exc:
-                errors.append(f"{label}_exception:{exc!r}")
-                print(f"{log_prefix} mode={mode} {label} fit failed: {exc}", flush=True)
-
-        xbest1, loglike1, diag1 = fits.get(True, (None, float("nan"), {"at_bounds": []}))
-        xbest0, loglike0, diag0 = fits.get(False, (None, float("nan"), {"at_bounds": []}))
+        fit1, fit0, errors, guesses = ir.fit_mode(mode, prep, args, gp_only=True, log_prefix=log_prefix)
+        xbest1, loglike1, diag1 = fit1 or (None, float("nan"), {"at_bounds": []})
+        xbest0, loglike0, diag0 = fit0 or (None, float("nan"), {"at_bounds": []})
 
         row = ir.make_row(
             period_idx, k_idx, phase_idx, period, k, prep["phase"], prep["A_inj"], prep["B_inj"], mode,
             xbest1, loglike1, diag1, args.period_tolerance, args.k_tolerance,
             ";".join(errors) if errors else None,
+            sigma_K=ir.planet_sigma_K(fit1, prep), k_sigma=args.k_sigma,
         )
 
         mgic = {"lnL_cond_planet": float("nan"), "lnL_cond_gp_only": float("nan"),
@@ -158,16 +131,15 @@ def run_one_combo(args_dict, period_idx, k_idx, phase_idx, period, k, seed, mode
             try:
                 for fit_planet, xbest, diag, tag in ((True, xbest1, diag1, "planet"),
                                                      (False, xbest0, diag0, "gp_only")):
-                    resid = residual(mode, xbest, diag["cov"], prep, fit_planet)
-                    value, lnL_cond, K_s = mgic_rv(diag["cov"], resid, prep["series_index"],
-                                                   prep["yerr_full"], len(xbest))
+                    value, lnL_cond, K_s = fit_mgic(mode, xbest, diag, prep, fit_planet)
                     mgic.update({f"mgic_{tag}": value, f"lnL_cond_{tag}": lnL_cond, f"Ks_{tag}": K_s})
                 mgic["delta_mgic"] = mgic["mgic_gp_only"] - mgic["mgic_planet"]
             except Exception as exc:
                 errors.append(f"mgic_exception:{exc!r}")
                 print(f"{log_prefix} mode={mode} MGIC failed: {exc}", flush=True)
 
-        mgic_pass = bool(np.isfinite(mgic["delta_mgic"]) and mgic["delta_mgic"] > args.mgic_threshold)
+        threshold = (args.mgic_thresholds or {}).get(mode, args.mgic_threshold)
+        mgic_pass = bool(np.isfinite(mgic["delta_mgic"]) and mgic["delta_mgic"] > threshold)
 
         flags = [f for f in row["diagnostic_flags"].split(",") if f] if row["diagnostic_flags"] else []
         if diag0.get("at_bounds"):
@@ -178,11 +150,12 @@ def run_one_combo(args_dict, period_idx, k_idx, phase_idx, period, k, seed, mode
         row.update({
             "loglike_gp_only": loglike0,
             "gp_only_at_bounds": ",".join(map(str, diag0.get("at_bounds", []))),
-            "mgic_threshold": args.mgic_threshold,
+            "mgic_threshold": threshold,
             "mgic_pass": mgic_pass,
             "recovered": int(row["param_match_pass"] and mgic_pass),
             "diagnostic_flags": ",".join(flags),
         })
+        row.update(ir.period_search_columns(args, guesses))
         rows.append(row)
 
     return rows
@@ -193,7 +166,11 @@ def _worker(task):
 
 
 def main():
-    ir.main_from_args(build_parser().parse_args(), csv_fields=CSV_FIELDS, worker_fn=_worker)
+    args = build_parser().parse_args()
+    args.mgic_thresholds = (load_mgic_thresholds(args.mgic_threshold_path,
+                                                 [m.strip() for m in args.models.split(",")])
+                            if args.mgic_threshold_path else None)
+    ir.main_from_args(args, csv_fields=CSV_FIELDS, worker_fn=_worker)
 
 
 if __name__ == "__main__":
