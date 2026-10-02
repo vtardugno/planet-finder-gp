@@ -188,6 +188,10 @@ def build_parser():
     # the same for every model; "gp" = scan of the likelihood gain of a sinusoid
     # under each model's own GP-only fit, so the search uses the activity model
     parser.add_argument("--period-search", choices=["periodogram", "gp"], default="periodogram")
+    parser.add_argument("--search-period-min", type=float, default=1.1,
+                         help="Shortest planet period searched (periodogram / GP scan) and allowed in "
+                              "the planet fit. The longest is --period-max. Independent of the "
+                              "injected grid's --period-min.")
     parser.add_argument("--n-period-guesses", type=int, default=2,
                          help="--period-search gp: number of periods (successively prewhitened "
                               "scan peaks) used as planet-fit starts.")
@@ -385,7 +389,7 @@ def fit_cyc(t_full, y_full, yerr_full, series_index, stds, args, planet_guess, c
     guesses = planet_guess if fit_planet else [None]
 
     for p in guesses:
-        period_bounds = (max(p - 10, 1.1), min(p + 10, args.period_max)) if fit_planet else None
+        period_bounds = (max(p - 10, args.search_period_min), min(p + 10, args.period_max)) if fit_planet else None
         bounds_list = build_bounds_list_cyc(args, stds, means, T, period_bounds, amp_bound, fit_planet=fit_planet)
 
         C = cov.Cov(
@@ -455,7 +459,7 @@ def fit_nonstat(t_full, y_full, yerr_full, series_index, stds, args, planet_gues
     guesses = planet_guess if fit_planet else [None]
 
     for p in guesses:
-        period_bounds = (max(p - 10, 1.1), min(p + 10, args.period_max)) if fit_planet else None
+        period_bounds = (max(p - 10, args.search_period_min), min(p + 10, args.period_max)) if fit_planet else None
         bounds_list = build_bounds_list_nonstat(args, stds, means, T, period_bounds, amp_bound, fit_planet=fit_planet)
 
         C = cov.Cov(
@@ -560,7 +564,7 @@ def fit_nonstat2(t_full, y_full, yerr_full, series_index, stds, args, planet_gue
     guesses = planet_guess if fit_planet else [None]
 
     for p in guesses:
-        period_bounds = (max(p - 10, 1.1), min(p + 10, args.period_max)) if fit_planet else None
+        period_bounds = (max(p - 10, args.search_period_min), min(p + 10, args.period_max)) if fit_planet else None
         bounds_list = build_bounds_list_nonstat2(args, stds, means, T, period_bounds, amp_bound, fit_planet=fit_planet)
 
         C = make_C()
@@ -612,7 +616,7 @@ def fit_nocyc(t_full, y_full, yerr_full, series_index, stds, args, planet_guess,
     guesses = planet_guess if fit_planet else [None]
 
     for p in guesses:
-        period_bounds = (max(p - 10, 1.1), min(p + 10, args.period_max)) if fit_planet else None
+        period_bounds = (max(p - 10, args.search_period_min), min(p + 10, args.period_max)) if fit_planet else None
         bounds_list = build_bounds_list_nocyc(args, stds, period_bounds, amp_bound, fit_planet=fit_planet)
 
         C = cov.Cov(
@@ -742,7 +746,7 @@ def gp_period_guesses(C, resid, prep, args):
     peaks, C being a GP-only fit and resid its mean-model residual."""
     t_full, series_index, rv_std = prep["t_full"], prep["series_index"], prep["rv_std"]
     baseline = np.ptp(t_full)
-    freqs = np.arange(1.0 / args.period_max, 1.0 / 1.1, 1.0 / (args.scan_oversample * baseline))
+    freqs = np.arange(1.0 / args.period_max, 1.0 / args.search_period_min, 1.0 / (args.scan_oversample * baseline))
     periods = 1.0 / freqs
 
     resid = resid.copy()
@@ -841,7 +845,7 @@ def prepare_injection(args, period, k, seed, modes_needed, log_prefix=""):
     if args.period_search == "periodogram":
         planet_guess, _ = mf.period_guess(
             t_full, y_full, yerr_full, series_index,
-            PMIN=1.1, PMAX=args.period_max, MAX_FAP=1e-5, MAX_NPL=2, plot=False,
+            PMIN=args.search_period_min, PMAX=args.period_max, MAX_FAP=1e-5, MAX_NPL=2, plot=False,
         )
 
     return {
