@@ -777,7 +777,25 @@ def run_emcee_nonstat(t_full, y_full, series_index, C, x0, bounds_list, run_leng
     nwalkers, ndim, log_probability_nonstat, args=(t_full, y_full, series_index, C, bounds_list, planet)
     )
     sampler.run_mcmc(pos, run_length, progress=True);
-    return sampler
+
+    params, _ = get_opt_params_nonstat(C)
+    labels = params + ['a0', 'a1', 'delta_0', 'delta_1']
+    if planet:
+        labels += ['planet_p', 'planet_A', 'planet_B']
+
+    # burn-in = 5 x max autocorrelation time, then re-estimate tau on the kept chain
+    burn = int(5 * np.max(sampler.get_autocorr_time(tol=0)))
+    tau = sampler.get_autocorr_time(discard=burn, tol=0)
+    n_post = sampler.iteration - burn
+    n_eff = nwalkers * n_post / tau
+
+    for name, t, ne in sorted(zip(labels, tau, n_eff), key=lambda x: -x[1]):
+        print(f"{name:>12s}  tau = {t:7.1f}   N/tau = {n_post / t:6.1f}   N_eff = {ne:8.0f}")
+    print(f"burn-in = {burn} steps (5 x tau_max)")
+    print(f"min N/tau = {n_post / tau.max():.1f}  (converged if > 50)")
+    print(f"min N_eff = {n_eff.min():.0f}")
+
+    return sampler, burn
 
 
 def plot_fit(t_full, y_full, yerr_full, series_index, C, xbest, rv_std = 1.0, output_name = 'fit_plot.png', return_residuals=True, inject_planet=True):
@@ -941,9 +959,11 @@ def plot_fit_nonstat(t_full, y_full, yerr_full, series_index, C, xbest, rv_std =
 
         ax = axs[k]
         if k ==0 :
-            ax.errorbar(t_full[series_index[k]], y_model[series_index[k]], yerr_full[series_index[k]], fmt='.', color='k', label='meas.')
+            mu=mu*1000
+            var=var*1000**2
+            ax.errorbar(t_full[series_index[k]], y_model[series_index[k]]*1000, yerr_full[series_index[k]]*1000, fmt='.', color='k', label='meas.')
             if inject_planet == True:
-                ax.plot(t_full[series_index[k]], planet_injection(t_full[series_index[k]], xbest[n+4], xbest[n+5], xbest[n+6])/rv_std, 'r', label='injected planet')
+                ax.plot(t_full[series_index[k]], planet_injection(t_full[series_index[k]], xbest[n+4], xbest[n+5], xbest[n+6])/rv_std * 1000, 'r', label='injected planet')
         if k == 1:
             ax.errorbar(t_full[series_index[k]], y_model[series_index[k]], yerr_full[series_index[k]], fmt='.', color='k', label='meas.')
         ax.fill_between(tsmooth,
@@ -953,9 +973,9 @@ def plot_fit_nonstat(t_full, y_full, yerr_full, series_index, C, xbest, rv_std =
             alpha=0.5)
         ax.plot(tsmooth, mu, 'g', label='predict.')
         if k == 0:
-            ax.set_ylabel("RV")
+            ax.set_ylabel("RV (m/s)",fontsize=16)
         if k == 1:
-            ax.set_ylabel('RHK')
+            ax.set_ylabel(r"$\log R'_\mathrm{HK}$", fontsize=16)
 
         if return_residuals==True:
             if k == 0:
@@ -963,8 +983,8 @@ def plot_fit_nonstat(t_full, y_full, yerr_full, series_index, C, xbest, rv_std =
             else:
                 res_rhk = y_model[series_index[k]] - mu_res
 
-    ax.set_xlabel('$t$')
-    axs[0].legend()
+    ax.set_xlabel('Time (days)', fontsize=16)
+    axs[0].legend(fontsize=16)
     plt.savefig(output_name)
     if return_residuals==True:
         return tsmooth, mus, res_rv, res_rhk
@@ -1073,9 +1093,15 @@ def plot_corner_nonstat(sampler, C, discard = 1000, planet = True, output_name =
         labels = params + ['a0', 'a1', 'delta_0', 'delta_1']
 
     fig = corner.corner(
-        flat_samples, labels=labels, show_titles=True
+        flat_samples, labels=labels, show_titles=True, label_kwargs={"fontsize": 17}, title_fmt=".2g", labelpad=0.15
     );
-    plt.savefig(output_name)
+    for ax in fig.get_axes():
+        ax.tick_params(labelsize=14)
+        title = ax.get_title()
+        if title:
+            ax.set_title(title.split(" = ")[-1], fontsize=17)
+
+    plt.savefig(output_name,bbox_inches="tight")
 
 
 def get_MAP_params(sampler, burn=1500, thin=1):

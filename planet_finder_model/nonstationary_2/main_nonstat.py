@@ -334,12 +334,12 @@ def main():
         if args.fit_planet:
             bounds_list[-3] = (np.max([best_p_init - 10, args.search_period_min]), np.min([best_p_init + 10, 400.0]))
 
-        sampler = mf.run_emcee_nonstat(t_full, y_full, series_index, C, xbest_all, bounds_list, run_length=args.run_length, planet=args.fit_planet)
+        sampler,burn = mf.run_emcee_nonstat(t_full, y_full, series_index, C, xbest_all, bounds_list, run_length=args.run_length, planet=args.fit_planet)
 
         corner_plot_name = "results_nonstat/corner_plot_" + args.output_name + ".png"
-        mf.plot_corner_nonstat(sampler, C, discard=args.corner_discard,planet=args.fit_planet,output_name=corner_plot_name)
+        mf.plot_corner_nonstat(sampler, C, discard=burn,planet=args.fit_planet,output_name=corner_plot_name)
 
-        map_params, _ = mf.get_MAP_params(sampler, args.map_burn, args.map_thin)
+        map_params, _ = mf.get_MAP_params(sampler, burn, args.map_thin)
         np.save("results_nonstat/map_params_" + args.output_name + ".npy", map_params)
 
 if __name__ == "__main__":
