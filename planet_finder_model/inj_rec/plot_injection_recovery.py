@@ -15,10 +15,18 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+plt.rcParams["font.size"] = 16  # default is 10
+
 
 def build_parser():
     parser = argparse.ArgumentParser(description="Plot the injection-recovery grid comparing cyc vs nonstat.")
     parser.add_argument("--input-csv", default="inj_rec/injection_recovery.csv")
+    parser.add_argument("--modes", type=str, default=None,
+                         help="Comma-separated GP modes to plot, left to right in the order given "
+                              "(e.g. cyc,no_cycle,nonstat2); default all present.")
+    parser.add_argument("--param-match-only", action="store_true",
+                         help="Rescore recovered as the P/K parameter match only (param_match_pass), "
+                              "ignoring the MGIC check.")
     parser.add_argument("--output", default="inj_rec/injection_recovery_grid.png")
     parser.add_argument("--n-period-bins", type=int, default=6)
     parser.add_argument("--n-k-bins", type=int, default=6)
@@ -85,6 +93,7 @@ def plot_panel(ax, frac, n_recovered, n_total, period_edges, k_edges, title):
                         edgecolors="white", linewidth=1.5)
     ax.set_xscale("log")
     ax.set_yscale("log")
+    ax.tick_params(axis="both", which="both", labelsize=12)
     ax.set_xlabel("Period (days)")
     ax.set_title(title)
 
@@ -101,7 +110,7 @@ def plot_panel(ax, frac, n_recovered, n_total, period_edges, k_edges, title):
             pct = frac[ki, pi] * 100
             label = f"{pct:.0f}%\n({n_recovered[ki, pi]}/{n_total[ki, pi]})"
             ax.text(x_c, y_c, label, ha="center", va="center",
-                     color=color, fontsize=6.5, fontweight="bold", linespacing=1.3)
+                     color=color, fontsize=9, fontweight="bold", linespacing=1.3)
 
     return im
 
@@ -109,6 +118,12 @@ def plot_panel(ax, frac, n_recovered, n_total, period_edges, k_edges, title):
 def main():
     args = build_parser().parse_args()
     df = pd.read_csv(args.input_csv)
+    if args.modes:
+        df = df[df["mode"].isin(args.modes.split(","))]
+    if args.param_match_only:
+        df["recovered"] = (df["param_match_pass"].astype(str) == "True").astype(int)
+        # drop so the titles below don't advertise the MGIC check that is no longer applied
+        df = df.drop(columns=["mgic_threshold"], errors="ignore")
     df["k_inj_ms"] = df["k_inj"] * 1000.0
 
     if args.period_bin_edges:
@@ -121,8 +136,9 @@ def main():
     else:
         k_edges = bin_edges(df["k_inj_ms"].to_numpy(), args.n_k_bins)
 
-    mode_titles = {"cyc": "cyc", "nonstat": "nonstat", "nonstat2": "nonstat2", "no_cycle": "no cycle"}
-    present_modes = [m for m in ("cyc", "nonstat", "nonstat2", "no_cycle") if m in df["mode"].unique()]
+    mode_titles = {"cyc": "Multi-GP + f_c", "nonstat": "Nonstat-GP old", "nonstat2": "Nonstat-GP", "no_cycle": "Multi-GP"}
+    mode_order = args.modes.split(",") if args.modes else ("cyc", "nonstat", "nonstat2", "no_cycle")
+    present_modes = [m for m in mode_order if m in df["mode"].unique()]
 
     fig, axs = plt.subplots(1, len(present_modes), figsize=(7 * len(present_modes), 9), sharey=True)
     if len(present_modes) == 1:
