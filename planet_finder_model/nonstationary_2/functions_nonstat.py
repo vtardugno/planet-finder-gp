@@ -992,6 +992,92 @@ def plot_fit_nonstat(t_full, y_full, yerr_full, series_index, C, xbest, rv_std =
         return tsmooth, mus
 
 
+def plot_fit_nonstat_residuals(t_full, y_full, yerr_full, series_index, C, xbest, rv_std = 1.0, output_name = 'fit_plot.png', return_residuals=True, inject_planet=True):
+
+    params, _ = get_opt_params_nonstat(C)
+    n = len(params)
+    idx_b = params.index('rot.nonstat_b')
+    idx_P = params.index('rot.nonstat_P')
+    idx_phi = params.index('rot.nonstat_phi')
+    idx_c = params.index('rot.nonstat_c')
+    T = np.max(t_full)
+
+    tsmooth = np.linspace(np.min(t_full), np.max(t_full), 1000)
+    _, axs = plt.subplots(4, 1, sharex=True, figsize=(15, 12), gridspec_kw={'height_ratios': [3, 1, 3, 1]})
+
+    mus = []
+    vars = []
+
+    for k in range(2):
+        C.kernel['rot']._kernel2.set_conditional_coef(series_id=k)
+
+        y_model = y_full.copy()
+        print("xbest:", xbest)
+        if inject_planet == True:
+            y_model[series_index[0]] -= (planet_injection(t_full[series_index[0]], xbest[n+4], xbest[n+5], xbest[n+6]))/rv_std
+
+        b, P, phi, c = xbest[idx_b], xbest[idx_P], xbest[idx_phi], xbest[idx_c]
+        core0 = shared_core_pos(t_full[series_index[0]], b, P, phi, c, T)
+        core1 = shared_core_pos(t_full[series_index[1]], b, P, phi, c, T)
+        a0, a1 = xbest[n], xbest[n+1]
+        d0, d1 = xbest[n+2], xbest[n+3]
+        y_model[series_index[0]] -=  a0*core0 + d0
+        y_model[series_index[1]] -=  a1*core1 + d1
+
+        mu, var = C.conditional(y_model, tsmooth, calc_cov='diag')
+        mu_res, _ = C.conditional(y_model, t_full[series_index[k]], calc_cov='diag')
+
+        mus.append(mu)
+        vars.append(var)
+
+        res = y_model[series_index[k]] - mu_res
+        res_err = yerr_full[series_index[k]]
+
+        ax = axs[2*k]
+        if k ==0 :
+            mu=mu*1000
+            var=var*1000**2
+            res = res*1000
+            res_err = res_err*1000
+            ax.errorbar(t_full[series_index[k]], y_model[series_index[k]]*1000, yerr_full[series_index[k]]*1000, fmt='.', color='k', label='meas.')
+            if inject_planet == True:
+                ax.plot(t_full[series_index[k]], planet_injection(t_full[series_index[k]], xbest[n+4], xbest[n+5], xbest[n+6])/rv_std * 1000, 'r', label='injected planet')
+        if k == 1:
+            ax.errorbar(t_full[series_index[k]], y_model[series_index[k]], yerr_full[series_index[k]], fmt='.', color='k', label='meas.')
+        ax.fill_between(tsmooth,
+            mu - np.sqrt(var),
+            mu + np.sqrt(var),
+            color='g',
+            alpha=0.5)
+        ax.plot(tsmooth, mu, 'g', label='predict.')
+        if k == 0:
+            ax.set_ylabel("RV (m/s)",fontsize=16)
+        if k == 1:
+            ax.set_ylabel(r"$\log R'_\mathrm{HK}$", fontsize=16)
+
+        ax_res = axs[2*k+1]
+        ax_res.errorbar(t_full[series_index[k]], res, res_err, fmt='.', color='k')
+        ax_res.axhline(0, color='g')
+        if k == 0:
+            ax_res.set_ylabel("Residual (m/s)", fontsize=16)
+        if k == 1:
+            ax_res.set_ylabel("Residual", fontsize=16)
+
+        if return_residuals==True:
+            if k == 0:
+                res_rv = y_model[series_index[k]] - mu_res
+            else:
+                res_rhk = y_model[series_index[k]] - mu_res
+
+    axs[-1].set_xlabel('Time (days)', fontsize=16)
+    axs[0].legend(fontsize=16)
+    plt.savefig(output_name)
+    if return_residuals==True:
+        return tsmooth, mus, res_rv, res_rhk
+    else:
+        return tsmooth, mus
+
+
 def plot_kernel_draw(t_full, C, xbest, sig=1.0, n_points=2000, output_name='kernel_draw.png'):
     """
     Unconditional sample draw from the optimised rotation kernel alone
