@@ -277,20 +277,20 @@ def fit_cycle(t_full, y_full, series_index, b0=0, P0=4000, phi0=0, print_results
 
     if plot == True:
 
-        fig, axs = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
+        fig, axs = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
 
 # RV panel
-        axs[0].plot(x, y_rv, '.', alpha=0.4, markersize=2, label='RV')
-        axs[0].plot(x, rv_fit, linewidth=3, label='RV fit')
-        axs[0].set_ylabel("RV")
-        axs[0].legend()
+        axs[0].plot(x, y_rv*1000, '.', color='k',label='meas.')
+        axs[0].plot(x, rv_fit*1000, linewidth=3, color='g',label='mean cycle function')
+        axs[0].set_ylabel("RV (m/s)", fontsize=16)
+        axs[0].legend(fontsize=16)
 
 # RHK panel
-        axs[1].plot(x, y_rhk, '.', alpha=0.4, markersize=2, label='RHK')
-        axs[1].plot(x, rhk_fit, linewidth=3, label='RHK fit')
-        axs[1].set_ylabel("RHK")
-        axs[1].set_xlabel("Time")
-        axs[1].legend()
+        axs[1].plot(x, y_rhk, '.', color='k')
+        axs[1].plot(x, rhk_fit, linewidth=3,color='g')
+        axs[1].set_ylabel(r"$\log R'_\text{HK}$", fontsize=16)
+        axs[1].set_xlabel("Time (days)", fontsize=16)
+    
 
         plt.tight_layout()
         plt.savefig(output_name)
