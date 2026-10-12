@@ -366,7 +366,7 @@ def fallback_cycle_seed(y_full, series_index, args):
 
 
 def fit_cyc(t_full, y_full, yerr_full, series_index, stds, args, planet_guess, cycle_seed, amp_bound, rv_std,
-            fit_planet=True):
+            fit_planet=True, planet_AB=None):
     rv_offset0, rv_amp0, rhk_offset0, rhk_amp0, b0, P0, phi0 = cycle_seed
     means = [np.mean(y_full[series_index[0]]), np.mean(y_full[series_index[1]])]
     T = np.max(t_full)
@@ -388,7 +388,7 @@ def fit_cyc(t_full, y_full, yerr_full, series_index, stds, args, planet_guess, c
     # runs on rescaled parameters, see mf.optimise_params_cyc)
     guesses = planet_guess if fit_planet else [None]
 
-    for p in guesses:
+    for i, p in enumerate(guesses):
         period_bounds = (max(p - 10, args.search_period_min), min(p + 10, args.period_max)) if fit_planet else None
         bounds_list = build_bounds_list_cyc(args, stds, means, T, period_bounds, amp_bound, fit_planet=fit_planet)
 
@@ -402,7 +402,10 @@ def fit_cyc(t_full, y_full, yerr_full, series_index, stds, args, planet_guess, c
                                   np.array([stds[0], 0.0])),
         )
         A0 = B0 = 0.0
-        if fit_planet:
+        if fit_planet and planet_AB is not None:
+            # --period-search gp: start from the scan's best-fit A/B at this period
+            A0, B0 = np.clip(planet_AB[i], -amp_bound, amp_bound)
+        elif fit_planet:
             resid = y_full.copy()
             resid[series_index[0]] -= rv_amp0 * mf.shared_core(t_full[series_index[0]], b0, P0, phi0) + rv_offset0
             resid[series_index[1]] -= rhk_amp0 * mf.shared_core(t_full[series_index[1]], b0, P0, phi0) + rhk_offset0
@@ -436,7 +439,7 @@ def fit_cyc(t_full, y_full, yerr_full, series_index, stds, args, planet_guess, c
 
 
 def fit_nonstat(t_full, y_full, yerr_full, series_index, stds, args, planet_guess, cycle_seed, amp_bound, rv_std,
-                 fit_planet=True):
+                 fit_planet=True, planet_AB=None):
     rv_offset0, rv_amp0, rhk_offset0, rhk_amp0, b0, P0, phi0 = cycle_seed
     means = [np.mean(y_full[series_index[0]]), np.mean(y_full[series_index[1]])]
     T = np.max(t_full)
@@ -458,7 +461,7 @@ def fit_nonstat(t_full, y_full, yerr_full, series_index, stds, args, planet_gues
     # runs on rescaled parameters, see mfn.optimise_params_nonstat)
     guesses = planet_guess if fit_planet else [None]
 
-    for p in guesses:
+    for i, p in enumerate(guesses):
         period_bounds = (max(p - 10, args.search_period_min), min(p + 10, args.period_max)) if fit_planet else None
         bounds_list = build_bounds_list_nonstat(args, stds, means, T, period_bounds, amp_bound, fit_planet=fit_planet)
 
@@ -475,7 +478,10 @@ def fit_nonstat(t_full, y_full, yerr_full, series_index, stds, args, planet_gues
             ),
         )
         A0 = B0 = 0.0
-        if fit_planet:
+        if fit_planet and planet_AB is not None:
+            # --period-search gp: start from the scan's best-fit A/B at this period
+            A0, B0 = np.clip(planet_AB[i], -amp_bound, amp_bound)
+        elif fit_planet:
             resid = y_full.copy()
             resid[series_index[0]] -= rv_amp0 * mfn.shared_core(t_full[series_index[0]], b0, P0, phi0) + rv_offset0
             resid[series_index[1]] -= rhk_amp0 * mfn.shared_core(t_full[series_index[1]], b0, P0, phi0) + rhk_offset0
@@ -508,7 +514,7 @@ def fit_nonstat(t_full, y_full, yerr_full, series_index, stds, args, planet_gues
 
 
 def fit_nonstat2(t_full, y_full, yerr_full, series_index, stds, args, planet_guess, cycle_seed, amp_bound, rv_std,
-                 fit_planet=True):
+                 fit_planet=True, planet_AB=None):
     rv_offset0, rv_amp0, rhk_offset0, rhk_amp0, b0, P0, phi0 = cycle_seed
     means = [np.mean(y_full[series_index[0]]), np.mean(y_full[series_index[1]])]
     T = np.max(t_full)
@@ -563,13 +569,16 @@ def fit_nonstat2(t_full, y_full, yerr_full, series_index, stds, args, planet_gue
     # see mfn2.optimise_params_nonstat)
     guesses = planet_guess if fit_planet else [None]
 
-    for p in guesses:
+    for i, p in enumerate(guesses):
         period_bounds = (max(p - 10, args.search_period_min), min(p + 10, args.period_max)) if fit_planet else None
         bounds_list = build_bounds_list_nonstat2(args, stds, means, T, period_bounds, amp_bound, fit_planet=fit_planet)
 
         C = make_C()
         A0 = B0 = 0.0
-        if fit_planet:
+        if fit_planet and planet_AB is not None:
+            # --period-search gp: start from the scan's best-fit A/B at this period
+            A0, B0 = np.clip(planet_AB[i], -amp_bound, amp_bound)
+        elif fit_planet:
             resid = y_full.copy()
             resid[series_index[0]] -= (rv_amp0 * mfn2.shared_core_pos(t_full[series_index[0]], b0, P0, phi0, c0, T)
                                        + rv_offset0)
@@ -603,7 +612,7 @@ def fit_nonstat2(t_full, y_full, yerr_full, series_index, stds, args, planet_gue
 
 
 def fit_nocyc(t_full, y_full, yerr_full, series_index, stds, args, planet_guess, rv_offset0, rhk_offset0, amp_bound,
-              rv_std, fit_planet=True):
+              rv_std, fit_planet=True, planet_AB=None):
     best_loglike = -np.inf
     xbest_all = None
     best_bounds_list = None
@@ -615,7 +624,7 @@ def fit_nocyc(t_full, y_full, yerr_full, series_index, stds, args, planet_guess,
     # runs on rescaled parameters, see mf.optimise_params)
     guesses = planet_guess if fit_planet else [None]
 
-    for p in guesses:
+    for i, p in enumerate(guesses):
         period_bounds = (max(p - 10, args.search_period_min), min(p + 10, args.period_max)) if fit_planet else None
         bounds_list = build_bounds_list_nocyc(args, stds, period_bounds, amp_bound, fit_planet=fit_planet)
 
@@ -629,7 +638,10 @@ def fit_nocyc(t_full, y_full, yerr_full, series_index, stds, args, planet_guess,
                                   np.array([stds[0], 0.0])),
         )
         A0 = B0 = 0.0
-        if fit_planet:
+        if fit_planet and planet_AB is not None:
+            # --period-search gp: start from the scan's best-fit A/B at this period
+            A0, B0 = np.clip(planet_AB[i], -amp_bound, amp_bound)
+        elif fit_planet:
             resid = y_full.copy()
             resid[series_index[0]] -= rv_offset0
             resid[series_index[1]] -= rhk_offset0
@@ -743,20 +755,22 @@ def planet_sigma_K(fit, prep):
 
 def gp_period_guesses(C, resid, prep, args):
     """Planet-fit starting periods from successively prewhitened gp_period_scan
-    peaks, C being a GP-only fit and resid its mean-model residual."""
+    peaks, C being a GP-only fit and resid its mean-model residual. Returns
+    the periods and each one's best-fit (A, B) from the scan."""
     t_full, series_index, rv_std = prep["t_full"], prep["series_index"], prep["rv_std"]
     baseline = np.ptp(t_full)
     freqs = np.arange(1.0 / args.period_max, 1.0 / args.search_period_min, 1.0 / (args.scan_oversample * baseline))
     periods = 1.0 / freqs
 
     resid = resid.copy()
-    guesses = []
+    guesses, amps = [], []
     for _ in range(args.n_period_guesses):
         p = float(periods[np.argmax(gp_period_scan(C, t_full, resid, series_index, rv_std, periods))])
         guesses.append(p)
         A, B = mf.gls_planet_amplitudes(C, t_full, resid, series_index, p, rv_std)
+        amps.append((A, B))
         resid[series_index[0]] -= mf.planet_injection(t_full[series_index[0]], p, A, B) / rv_std
-    return guesses
+    return guesses, amps
 
 
 def make_row(period_idx, k_idx, phase_idx, period_inj, k_inj, phase_inj, A_inj, B_inj, mode,
@@ -888,16 +902,17 @@ def fit_mode(mode, prep, args, gp_only=False, log_prefix=""):
             print(f"{log_prefix} mode={mode} GP-only fit failed: {exc}", flush=True)
 
     guesses = prep["planet_guess"]
+    amps = None
     if args.period_search == "gp":
         if fit0 is None:
             return None, None, errors, None
         xbest0, _, diag0 = fit0
         resid0 = residual(mode, xbest0, diag0["cov"], prep, fit_planet=False)
-        guesses = gp_period_guesses(diag0["cov"], resid0, prep, args)
+        guesses, amps = gp_period_guesses(diag0["cov"], resid0, prep, args)
         fit_fn, fit_args = fit_fn_and_args(mode, prep, args, guesses)
 
     try:
-        fit1 = fit_fn(*fit_args, fit_planet=True)
+        fit1 = fit_fn(*fit_args, fit_planet=True, planet_AB=amps)
     except Exception as exc:
         errors.append(f"gp_planet_exception:{exc!r}")
         print(f"{log_prefix} mode={mode} GP+planet fit failed: {exc}", flush=True)
