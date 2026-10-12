@@ -8,8 +8,7 @@ import importlib.util
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
-# The pipeline-2 modules share their names (functions / functions_nonstat)
-# with the old ones, so load each explicitly from file under a distinct name
+# The model dirs aren't packages, so load each module explicitly from file
 # (same modules as inj_rec/injection_recovery.py)
 def _load_module(name, relpath):
     spec = importlib.util.spec_from_file_location(name, os.path.join(ROOT, relpath))
@@ -17,9 +16,8 @@ def _load_module(name, relpath):
     spec.loader.exec_module(module)
     return module
 
-mf = _load_module("functions_pipeline2", os.path.join("cyc_pipeline2", "functions.py"))
-mfn = _load_module("functions_nonstat_pipeline2", os.path.join("nonstationary", "nonstationary_pipeline2", "functions_nonstat.py"))
-mfn2 = _load_module("functions_nonstat_2", os.path.join("nonstationary_2", "functions_nonstat.py"))
+mf = _load_module("functions_cyc", os.path.join("cyc", "functions.py"))
+mfn2 = _load_module("functions_nonstat2", os.path.join("nonstat2", "functions_nonstat.py"))
 
 class MultiSeriesKernel(term.MultiSeriesKernel):
   def _grad_param(self, grad_dU=None, grad_dV=None):
@@ -29,7 +27,7 @@ class MultiSeriesKernel(term.MultiSeriesKernel):
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="12-fold CV of the no_cycle / cyc / nonstat / nonstat2 models using pipeline 2."
+        description="12-fold contiguous-block CV of the no_cycle / cyc / nonstat2 models."
     )
 
     # Data loading
@@ -41,11 +39,10 @@ def build_parser():
     parser.add_argument("--planet-A", type=float, default=0.001, help="Injected planet semi-amplitude")
     parser.add_argument("--planet-B", type=float, default=0.001, help="Injected planet phase")
 
-    # Cycle fit (warm-start seeds for the joint cyc/nonstat optimisation)
+    # Cycle fit (warm-start seeds for the joint cyc/nonstat2 optimisation)
     parser.add_argument("--cycle-b0", type=float, default=0.0, help="Initial shared linear coefficient")
     parser.add_argument("--cycle-P0", type=float, default=4000.0, help="Initial cycle period")
     parser.add_argument("--cycle-phi0", type=float, default=0.0, help="Initial cycle phase")
-    parser.add_argument("--mu0", type=float, default=0.0, help="Initial covariance-modulation strength (nonstat only)")
 
     # Model / covariance settings
     parser.add_argument("--sig", type=float, default=1.0, help="MEPKernel sigma")
@@ -74,8 +71,8 @@ def build_parser():
     parser.add_argument("--planet-B-min", type=float, default=-0.1)
     parser.add_argument("--planet-B-max", type=float, default=0.1)
 
-    # cyc / nonstat / nonstat2 shared cycle-term bounds, data-relative as in
-    # cyc_pipeline2/main_cycle_likelihood.py / nonstationary_pipeline2/main_nonstat.py:
+    # cyc / nonstat2 shared cycle-term bounds, data-relative as in
+    # cyc/main_cycle_likelihood.py:
     # |b| <= drift/T, |a| <= frac*std, delta within mean +/- frac*std
     parser.add_argument("--cycle-b-max-drift", type=float, default=5.0, help="Max |b|*T, i.e. linear drift of the core over the time baseline")
     parser.add_argument("--Pcyc-min", type=float, default=3000.0)
@@ -87,17 +84,13 @@ def build_parser():
     parser.add_argument("--delta0-max-frac", type=float, default=10.0)
     parser.add_argument("--delta1-max-frac", type=float, default=10.0)
 
-    # nonstat-only bounds
-    parser.add_argument("--mu-min", type=float, default=-5.0)
-    parser.add_argument("--mu-max", type=float, default=5.0)
-
-    # nonstat2-only bounds / warm start (nonstationary_2/main_nonstat.py)
+    # nonstat2-only bounds / warm start (nonstat2/main_nonstat.py)
     parser.add_argument("--cycle-c0", type=float, default=None, help="Initial core offset c (default: derived so the warm-start core's minimum sits 1.0 above 0)")
     parser.add_argument("--nonstat2-Pcyc-min", type=float, default=3000.0)
     parser.add_argument("--cycle-c-min", type=float, default=0.0)
     parser.add_argument("--cycle-c-max", type=float, default=10.0)
 
-    # no_cycle-only bounds (cyc_pipeline2/main_cycle_likelihood.py --no-fit-cycle):
+    # no_cycle-only bounds (cyc/main_cycle_likelihood.py --no-fit-cycle):
     # no cycle term to absorb long-period variability, so rho/eta need more room
     parser.add_argument("--nocyc-rho-max", type=float, default=100.0)
     parser.add_argument("--nocyc-eta-max", type=float, default=3.0)
@@ -110,7 +103,7 @@ def build_parser():
     parser.add_argument("--planet-p", type=float, default=None, help="Initial planet period (default: from the periodogram of each training fold)")
     parser.add_argument("--fit-planet", action=argparse.BooleanOptionalAction, default=False, help="Include planet parameters in the optimisation")
     parser.add_argument("--change-C", action=argparse.BooleanOptionalAction, default=True, help="Write the optimised kernel parameters back into C")
-    parser.add_argument("--output-csv", default="CV/cv_pipeline2_results.csv", help="Where to save per-fold CV results")
+    parser.add_argument("--output-csv", default="CV/cv_block_results.csv", help="Where to save per-fold CV results")
 
     return parser
 
@@ -179,42 +172,6 @@ def build_bounds_list_cyc(args, stds, means, T, planet_p):
 
     return bounds_list
 
-def build_bounds_list_nonstat(args, stds, means, T, planet_p):
-    rvjit_max = args.rvjit_max_frac * stds[0]
-    rhkjit_max = args.rhkjit_max_frac * stds[1]
-    alpha_0_max = args.alpha0_max_frac * stds[0]
-    alpha_1_max = args.alpha1_max_frac * stds[1]
-    beta_0_max = args.beta0_max_frac * stds[0]
-    b_max = args.cycle_b_max_drift / T
-    a0_max = args.a0_max_frac * stds[0]
-    a1_max = args.a1_max_frac * stds[1]
-    delta0_half = args.delta0_max_frac * stds[0]
-    delta1_half = args.delta1_max_frac * stds[1]
-
-    bounds_list = [
-        (0.0, rvjit_max),
-        (0.0, rhkjit_max),
-        (args.mu_min, args.mu_max),
-        (-b_max, b_max),
-        (args.Pcyc_min, args.Pcyc_max),
-        (args.phi_min, args.phi_max),
-        (args.prot_min, args.prot_max),
-        (args.rho_min, args.rho_max),
-        (args.eta_min, args.eta_max),
-        (0.0, alpha_0_max),
-        (-alpha_1_max, alpha_1_max),
-        (-beta_0_max, beta_0_max),
-        (-a0_max, a0_max),
-        (-a1_max, a1_max),
-        (means[0] - delta0_half, means[0] + delta0_half),
-        (means[1] - delta1_half, means[1] + delta1_half),
-    ]
-
-    if args.fit_planet:
-        bounds_list += planet_bounds(args, planet_p)
-
-    return bounds_list
-
 def build_bounds_list_nonstat2(args, stds, means, T, planet_p):
     rvjit_max = args.rvjit_max_frac * stds[0]
     rhkjit_max = args.rhkjit_max_frac * stds[1]
@@ -253,7 +210,7 @@ def build_bounds_list_nonstat2(args, stds, means, T, planet_p):
 
 def clip_cycle_seed(cycle_params, bounds_list, b_idx):
     # Keep the cycle warm start inside the (data-relative) bounds; b and P sit
-    # at b_idx and b_idx+1 (8 for cyc, 3 for nonstat)
+    # at b_idx and b_idx+1 (8 for cyc)
     rv_offset0, rv_amp0, rhk_offset0, rhk_amp0, b0, P0, phi0 = cycle_params
     phi0 = (phi0 + np.pi) % (2 * np.pi) - np.pi
     b0 = np.clip(b0, bounds_list[b_idx][0], bounds_list[b_idx][1])
@@ -272,7 +229,7 @@ def planet_seed(args, gls_fn, C, t_full, y_full, series_index, mean0, mean1, pla
     return np.clip(A, bounds_list[-2][0], bounds_list[-2][1]), np.clip(B, bounds_list[-1][0], bounds_list[-1][1])
 
 def warm_start_nonstat2(args, t_full, cycle_params, bounds_list, stds, T):
-    # Same warm start as nonstationary_2/main_nonstat.py
+    # Same warm start as nonstat2/main_nonstat.py
     rv_offset0, rv_amp0, rhk_offset0, rhk_amp0, b0, P0, phi0 = cycle_params
 
     # The covariance envelope is core(t)*core(t'), so (unlike the mean) the
@@ -378,41 +335,6 @@ def fit_cyc(args, t_full, y_full, yerr_full, series_index, stds, planet_p, cycle
                             fit_planet=args.fit_planet,
                             change_C=args.change_C)
 
-def fit_nonstat(args, t_full, y_full, yerr_full, series_index, stds, planet_p, cycle_params, rv_std):
-    means = [np.mean(y_full[series_index[0]]), np.mean(y_full[series_index[1]])]
-    bounds_list = build_bounds_list_nonstat(args, stds, means, np.max(t_full), planet_p)
-    rv_offset0, rv_amp0, rhk_offset0, rhk_amp0, b0, P0, phi0 = clip_cycle_seed(cycle_params, bounds_list, 3)
-
-    C = cov.Cov(
-                t_full,
-                err=term.Error(yerr_full),
-                rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
-                rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
-                rot = term.SimpleProductKernel(
-                        nonstat=mfn.NonStationaryKernel(mfn.alpha_cyc, mfn.alpha_cyc_grad, mu=args.mu0, b=b0, P=P0, phi=phi0),
-                        qp=MultiSeriesKernel(term.MEPKernel(args.sig,args.prot,args.rho,args.eta), series_index,
-                                np.array([stds[0], stds[1]]),
-                                np.array([stds[0], 0.0])
-                            ),
-                    ),
-                )
-
-    A0, B0 = planet_seed(args, mfn.gls_planet_amplitudes, C, t_full, y_full, series_index,
-                         rv_amp0 * mfn.shared_core(t_full[series_index[0]], b0, P0, phi0) + rv_offset0,
-                         rhk_amp0 * mfn.shared_core(t_full[series_index[1]], b0, P0, phi0) + rhk_offset0,
-                         planet_p, bounds_list, rv_std)
-
-    return mfn.optimise_params_nonstat(t_full, y_full, series_index, C, bounds_list,
-                            a0=rv_amp0,
-                            a1=rhk_amp0,
-                            d0=rv_offset0,
-                            d1=rhk_offset0,
-                            planet_p=planet_p if args.fit_planet else args.cycle_P0,
-                            planet_A=A0,
-                            planet_B=B0,
-                            fit_planet=args.fit_planet,
-                            change_C=args.change_C)
-
 def fit_nonstat2(args, t_full, y_full, yerr_full, series_index, stds, planet_p, cycle_params, rv_std):
     T = np.max(t_full)
     means = [np.mean(y_full[series_index[0]]), np.mean(y_full[series_index[1]])]
@@ -472,14 +394,12 @@ def main():
     yerr_rhk = yerr_full[series_index[1]]
 
     N = len(t)
-    rng = np.random.default_rng(42)
-    perm = rng.permutation(N)
+    order = np.argsort(t)
     fold_ids = np.empty(N, dtype=int)
-    fold_ids[perm] = np.arange(N) % 12
+    fold_ids[order] = np.arange(N) * 12 // N
 
     loglike_total_nocyc = 0
     loglike_total_cyc = 0
-    loglike_total_nonstat = 0
     loglike_total_nonstat2 = 0
     cv_rows = []
 
@@ -529,7 +449,7 @@ def main():
         loglike_total_nocyc = loglike_total_nocyc + test_loglike_nocyc
         print(f"fold {fold:02d} [no_cycle]: test loglike={test_loglike_nocyc:.6f}")
         cv_rows.append({"fold": fold, "mode": "no_cycle", "test_loglike": test_loglike_nocyc, "planet_p": planet_p_fold})
-        fit_plot_name_optim = f"CV/p2_optim_fit_plot_no_cycle_{fold}.png"
+        fit_plot_name_optim = f"CV/block_optim_fit_plot_no_cycle_{fold}.png"
         mf.plot_fit(t_full_train, y_full_train, yerr_full_train, series_index_train, C, xbest, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
 
         # CYC (simultaneous GP + cycle mean-term optimisation)
@@ -554,36 +474,10 @@ def main():
         print(f"fold {fold:02d} [cyc]: test loglike={test_loglike_cyc:.6f}")
         cv_rows.append({"fold": fold, "mode": "cyc", "test_loglike": test_loglike_cyc, "planet_p": planet_p_fold})
 
-        fit_plot_name_optim = f"CV/p2_optim_fit_plot_cyc_{fold}.png"
+        fit_plot_name_optim = f"CV/block_optim_fit_plot_cyc_{fold}.png"
         mf.plot_fit_cyc(t_full_train, y_full_train, yerr_full_train, series_index_train, C, xbest, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
 
-        # NONSTAT (cycle modulates the covariance envelope as well as the mean)
-
-        xbest, C = fit_nonstat(args, t_full_train, y_full_train, yerr_full_train, series_index_train, stds, planet_p_fold, cycle_params, rv_std)
-
-        C_test = cov.Cov(
-                                t_full_test,
-                                err=term.Error(yerr_full_test),
-                                rv_jit=term.InstrumentJitter(series_index_test[0], xbest[0]),
-                                rhk_jit=term.InstrumentJitter(series_index_test[1], xbest[1]),
-                                rot = term.SimpleProductKernel(
-                                        nonstat=mfn.NonStationaryKernel(mfn.alpha_cyc, mfn.alpha_cyc_grad, mu=xbest[2], b=xbest[3], P=xbest[4], phi=xbest[5]),
-                                        qp=MultiSeriesKernel(term.MEPKernel(args.sig,xbest[6],xbest[7],xbest[8]), series_index_test,
-                                                np.array([xbest[9], xbest[10]]),
-                                                np.array([xbest[11], 0.0])
-                                            ),
-                                    ),
-                                )
-
-        test_loglike_nonstat = -1*mfn.negloglike_nonstat(xbest, t_full_test, y_full_test, series_index_test, C_test, rv_std, inject_planet=args.fit_planet)[0]
-        loglike_total_nonstat = loglike_total_nonstat + test_loglike_nonstat
-        print(f"fold {fold:02d} [nonstat]: test loglike={test_loglike_nonstat:.6f}")
-        cv_rows.append({"fold": fold, "mode": "nonstat", "test_loglike": test_loglike_nonstat, "planet_p": planet_p_fold})
-
-        fit_plot_name_optim = f"CV/p2_optim_fit_plot_nonstat_{fold}.png"
-        mfn.plot_fit_nonstat(t_full_train, y_full_train, yerr_full_train, series_index_train, C, xbest, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
-
-        # NONSTAT2 (positive normalised core modulates the covariance and the mean, nonstationary_2)
+        # NONSTAT2 (positive normalised core modulates the covariance and the mean, nonstat2/)
 
         T_train = np.max(t_full_train)
         xbest, C = fit_nonstat2(args, t_full_train, y_full_train, yerr_full_train, series_index_train, stds, planet_p_fold, cycle_params, rv_std)
@@ -608,14 +502,13 @@ def main():
         print(f"fold {fold:02d} [nonstat2]: test loglike={test_loglike_ns2:.6f}")
         cv_rows.append({"fold": fold, "mode": "nonstat2", "test_loglike": test_loglike_ns2, "planet_p": planet_p_fold})
 
-        fit_plot_name_optim = f"CV/p2_optim_fit_plot_nonstat2_{fold}.png"
+        fit_plot_name_optim = f"CV/block_optim_fit_plot_nonstat2_{fold}.png"
         mfn2.plot_fit_nonstat(t_full_train, y_full_train, yerr_full_train, series_index_train, C, xbest, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
 
         plt.close("all")
 
     print(f"Total log-likelihood [no_cycle]: {loglike_total_nocyc}")
     print(f"Total log-likelihood [cyc]: {loglike_total_cyc}")
-    print(f"Total log-likelihood [nonstat]: {loglike_total_nonstat}")
     print(f"Total log-likelihood [nonstat2]: {loglike_total_nonstat2}")
 
     try:
@@ -627,7 +520,7 @@ def main():
         print(f"\nCould not save CV results CSV: {exc}")
         print(cv_rows)
 
-    # Whole-dataset refit + AIC/BIC for all four models
+    # Whole-dataset refit + AIC/BIC for all three models
 
     T = [t,t]
     Y = [y_rv, y_rhk]
@@ -671,18 +564,6 @@ def main():
     aic_cyc = 2 * k_cyc - 2 * loglike_cyc
     bic_cyc = k_cyc * np.log(n_train) - 2 * loglike_cyc
 
-    # NONSTAT
-
-    xbest, C = fit_nonstat(args, t_full, y_full, yerr_full, series_index, stds, planet_p, cycle_params, rv_std)
-
-    print("xbest nonstat: ", xbest)
-    loglike_nonstat = -mfn.negloglike_nonstat(
-        xbest, t_full, y_full, series_index, C, rv_std, inject_planet=args.fit_planet)[0]
-
-    k_nonstat = len(xbest)
-    aic_nonstat = 2 * k_nonstat - 2 * loglike_nonstat
-    bic_nonstat = k_nonstat * np.log(n_train) - 2 * loglike_nonstat
-
     # NONSTAT2
 
     xbest, C = fit_nonstat2(args, t_full, y_full, yerr_full, series_index, stds, planet_p, cycle_params, rv_std)
@@ -697,11 +578,9 @@ def main():
 
     print("BIC [no_cycle]: ", bic_nocyc)
     print("BIC [cyc]: ", bic_cyc)
-    print("BIC [nonstat]: ", bic_nonstat)
     print("BIC [nonstat2]: ", bic_nonstat2)
     print("AIC [no_cycle]: ", aic_nocyc)
     print("AIC [cyc]: ", aic_cyc)
-    print("AIC [nonstat]: ", aic_nonstat)
     print("AIC [nonstat2]: ", aic_nonstat2)
 
 if __name__ == "__main__":

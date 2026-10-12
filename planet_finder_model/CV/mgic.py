@@ -5,14 +5,14 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from CV_pipeline2 import build_parser, fit_nocyc, fit_cyc, fit_nonstat, fit_nonstat2, mf, mfn, mfn2
+from CV import build_parser, fit_nocyc, fit_cyc, fit_nonstat2, mf, mfn2
 
 # MGIC (sections 15-16 of GPRV/MGIC tutorial/tutorial_basics_of_MGIC.ipynb) for
-# the four pipeline-2 models, evaluated at the whole-dataset optimiser xbest.
+# the three models, evaluated at the whole-dataset optimiser xbest.
 # Every model is RV + RHK, so the RV likelihood is conditioned on RHK and the
 # smoother is built from the RV latent GP covariance left after that conditioning.
 
-MODES = ["no_cycle", "cyc", "nonstat", "nonstat2"]
+MODES = ["no_cycle", "cyc", "nonstat2"]
 
 def mean_model(mode, xbest, C, t_full, series_index, T, fit_planet):
     # Mirrors the y_model construction in each model's negloglike
@@ -31,14 +31,6 @@ def mean_model(mode, xbest, C, t_full, series_index, T, fit_planet):
         mean[series_index[1]] = xbest[12] * mf.shared_core(t1, b, P, phi) + xbest[14]
         if fit_planet:
             mean[series_index[0]] += mf.planet_injection(t0, xbest[15], xbest[16], xbest[17])
-
-    elif mode == "nonstat":
-        n = len(mfn.get_opt_params_nonstat(C)[0])
-        b, P, phi = C.get_param(['rot.nonstat_b', 'rot.nonstat_P', 'rot.nonstat_phi'])
-        mean[series_index[0]] = xbest[n] * mfn.shared_core(t0, b, P, phi) + xbest[n+2]
-        mean[series_index[1]] = xbest[n+1] * mfn.shared_core(t1, b, P, phi) + xbest[n+3]
-        if fit_planet:
-            mean[series_index[0]] += mfn.planet_injection(t0, xbest[n+4], xbest[n+5], xbest[n+6])
 
     elif mode == "nonstat2":
         n = len(mfn2.get_opt_params_nonstat(C)[0])
@@ -148,9 +140,6 @@ def main():
         elif mode == "cyc":
             xbest, C = fit_cyc(args, t_full, y_full, yerr_full, series_index, stds, planet_p, cycle_params, rv_std)
             loglike = -mf.negloglike_cyc(xbest, t_full, y_full, series_index, C, rv_std, inject_planet=args.fit_planet)[0]
-        elif mode == "nonstat":
-            xbest, C = fit_nonstat(args, t_full, y_full, yerr_full, series_index, stds, planet_p, cycle_params, rv_std)
-            loglike = -mfn.negloglike_nonstat(xbest, t_full, y_full, series_index, C, rv_std, inject_planet=args.fit_planet)[0]
         elif mode == "nonstat2":
             xbest, C = fit_nonstat2(args, t_full, y_full, yerr_full, series_index, stds, planet_p, cycle_params, rv_std)
             loglike = -mfn2.negloglike_nonstat(xbest, t_full, y_full, series_index, C, rv_std, inject_planet=args.fit_planet)[0]

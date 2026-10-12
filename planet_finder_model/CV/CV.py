@@ -1,15 +1,23 @@
-import sys
-import os
-# functions.py and the nonstationary* model dirs live in the parent folder
-_PARENT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, _PARENT)
-import functions as mf
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.optimize import curve_fit
 from spleaf import cov, term
-import emcee
 import argparse
+import os
+import importlib.util
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+
+# The model dirs aren't packages, so load each module explicitly from file
+# (same modules as inj_rec/injection_recovery.py)
+def _load_module(name, relpath):
+    spec = importlib.util.spec_from_file_location(name, os.path.join(ROOT, relpath))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+mf = _load_module("functions_cyc", os.path.join("cyc", "functions.py"))
+mfn2 = _load_module("functions_nonstat2", os.path.join("nonstat2", "functions_nonstat.py"))
 
 class MultiSeriesKernel(term.MultiSeriesKernel):
   def _grad_param(self, grad_dU=None, grad_dV=None):
@@ -19,11 +27,11 @@ class MultiSeriesKernel(term.MultiSeriesKernel):
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="Run the RV/RHK fit pipeline with command-line arguments."
+        description="12-fold CV of the no_cycle / cyc / nonstat2 models."
     )
 
     # Data loading
-    parser.add_argument("--path", default="Solar Data", help="Directory containing Analyse_summary.csv and Analyse_ccf.p")
+    parser.add_argument("--path", default="data/Solar_Data", help="Directory containing Analyse_summary.csv and Analyse_ccf.p")
     parser.add_argument("--star-name", default="Sun", help="Star name key used inside Analyse_ccf.p")
     parser.add_argument("--normalise", action=argparse.BooleanOptionalAction, default=False, help="Normalise RV and RHK")
     parser.add_argument("--inject-planet", action=argparse.BooleanOptionalAction, default=False, help="Inject a synthetic planet signal into RV")
@@ -31,14 +39,10 @@ def build_parser():
     parser.add_argument("--planet-A", type=float, default=0.001, help="Injected planet semi-amplitude")
     parser.add_argument("--planet-B", type=float, default=0.001, help="Injected planet phase")
 
-    # Cycle fit
-    parser.add_argument("--cycle-fit", action=argparse.BooleanOptionalAction, default=True, help="Fit the long-term cycle and remove it before fitting the GP")
+    # Cycle fit (warm-start seeds for the joint cyc/nonstat2 optimisation)
     parser.add_argument("--cycle-b0", type=float, default=0.0, help="Initial shared linear coefficient")
     parser.add_argument("--cycle-P0", type=float, default=4000.0, help="Initial cycle period")
     parser.add_argument("--cycle-phi0", type=float, default=0.0, help="Initial cycle phase")
-    parser.add_argument("--cycle-print-results", action=argparse.BooleanOptionalAction, default=False, help="Print fitted shared cycle parameters")
-    parser.add_argument("--cycle-plot", action=argparse.BooleanOptionalAction, default=True, help="Save the cycle fit plots")
-    # parser.add_argument("--cycle-output-name", default="cycle_fit.png", help="Base filename for cycle fit plots")
 
     # Model / covariance settings
     parser.add_argument("--sig", type=float, default=1.0, help="MEPKernel sigma")
@@ -60,40 +64,92 @@ def build_parser():
     parser.add_argument("--alpha0-max-frac", type=float, default=10.0)
     parser.add_argument("--alpha1-max-frac", type=float, default=5.0)
     parser.add_argument("--beta0-max-frac", type=float, default=10.0)
-    parser.add_argument("--planet-p-min", type=float, default=None)
-    parser.add_argument("--planet-p-max", type=float, default=None)
-    parser.add_argument("--planet-A-min", type=float, default=0.000001)
+    parser.add_argument("--planet-p-min", type=float, default=None, help="Default: planet_p - 10")
+    parser.add_argument("--planet-p-max", type=float, default=None, help="Default: planet_p + 10")
+    parser.add_argument("--planet-A-min", type=float, default=-0.1)
     parser.add_argument("--planet-A-max", type=float, default=0.1)
-    parser.add_argument("--planet-B-min", type=float, default=0.000001)
+    parser.add_argument("--planet-B-min", type=float, default=-0.1)
     parser.add_argument("--planet-B-max", type=float, default=0.1)
-    parser.add_argument("--delta0-min", type=float, default=-0.5)
-    parser.add_argument("--delta0-max", type=float, default=0.5)
-    parser.add_argument("--delta1-min", type=float, default=-2.0)
-    parser.add_argument("--delta1-max", type=float, default=2.0)
 
-    # Optimisation / MCMC
-    parser.add_argument("--delta-0", type=float, default=-0.001, help="Initial delta_0")
-    parser.add_argument("--delta-1", type=float, default=0.001, help="Initial delta_1")
-    parser.add_argument("--planet-p", type=float, default=None, help="Initial planet period")
-    parser.add_argument("--planet-A-fit", type=float, default=0.01, help="Initial planet K")
-    parser.add_argument("--planet-B-fit", type=float, default=0.01, help="Initial planet phi")
+    # cyc / nonstat2 shared cycle-term bounds, data-relative as in
+    # cyc/main_cycle_likelihood.py:
+    # |b| <= drift/T, |a| <= frac*std, delta within mean +/- frac*std
+    parser.add_argument("--cycle-b-max-drift", type=float, default=5.0, help="Max |b|*T, i.e. linear drift of the core over the time baseline")
+    parser.add_argument("--Pcyc-min", type=float, default=3000.0)
+    parser.add_argument("--Pcyc-max", type=float, default=5500.0)
+    parser.add_argument("--phi-min", type=float, default=-np.pi)
+    parser.add_argument("--phi-max", type=float, default=np.pi)
+    parser.add_argument("--a0-max-frac", type=float, default=10.0)
+    parser.add_argument("--a1-max-frac", type=float, default=10.0)
+    parser.add_argument("--delta0-max-frac", type=float, default=10.0)
+    parser.add_argument("--delta1-max-frac", type=float, default=10.0)
+
+    # nonstat2-only bounds / warm start (nonstat2/main_nonstat.py)
+    parser.add_argument("--cycle-c0", type=float, default=None, help="Initial core offset c (default: derived so the warm-start core's minimum sits 1.0 above 0)")
+    parser.add_argument("--nonstat2-Pcyc-min", type=float, default=3000.0)
+    parser.add_argument("--cycle-c-min", type=float, default=0.0)
+    parser.add_argument("--cycle-c-max", type=float, default=10.0)
+
+    # no_cycle-only bounds (cyc/main_cycle_likelihood.py --no-fit-cycle):
+    # no cycle term to absorb long-period variability, so rho/eta need more room
+    parser.add_argument("--nocyc-rho-max", type=float, default=100.0)
+    parser.add_argument("--nocyc-eta-max", type=float, default=3.0)
+    parser.add_argument("--nocyc-delta0-min", type=float, default=-0.5)
+    parser.add_argument("--nocyc-delta0-max", type=float, default=0.5)
+    parser.add_argument("--nocyc-delta1-min", type=float, default=-5.0)
+    parser.add_argument("--nocyc-delta1-max", type=float, default=5.0)
+
+    # Optimisation
+    parser.add_argument("--planet-p", type=float, default=None, help="Initial planet period (default: from the periodogram of each training fold)")
     parser.add_argument("--fit-planet", action=argparse.BooleanOptionalAction, default=False, help="Include planet parameters in the optimisation")
     parser.add_argument("--change-C", action=argparse.BooleanOptionalAction, default=True, help="Write the optimised kernel parameters back into C")
     parser.add_argument("--output-csv", default="CV/cv_results.csv", help="Where to save per-fold CV results")
-    # Outputs
-    # parser.add_argument("--fit-output", default="fit_plot.png", help="Output name for the fit plot")
-    # parser.add_argument("--chains-output", default="chains_plot.png", help="Output name for the chains plot")
-    # parser.add_argument("--corner-output", default="corner_plot.png", help="Output name for the corner plot")
 
     return parser
 
-def build_bounds_list(args, stds):
+def planet_bounds(args, planet_p):
+    p_min = args.planet_p_min if args.planet_p_min is not None else max(planet_p - 10, 1.1)
+    p_max = args.planet_p_max if args.planet_p_max is not None else min(planet_p + 10, 400.0)
+    return [(p_min, p_max), (args.planet_A_min, args.planet_A_max), (args.planet_B_min, args.planet_B_max)]
+
+def build_bounds_list_nocyc(args, stds, planet_p):
     rvjit_max = args.rvjit_max_frac * stds[0]
     rhkjit_max = args.rhkjit_max_frac * stds[1]
     alpha_0_max = args.alpha0_max_frac * stds[0]
     alpha_1_max = args.alpha1_max_frac * stds[1]
     beta_0_max = args.beta0_max_frac * stds[0]
-    return [
+
+    bounds_list = [
+        (0.0, rvjit_max),
+        (0.0, rhkjit_max),
+        (args.prot_min, args.prot_max),
+        (args.rho_min, args.nocyc_rho_max),
+        (args.eta_min, args.nocyc_eta_max),
+        (0.0, alpha_0_max),
+        (-alpha_1_max, alpha_1_max),
+        (-beta_0_max, beta_0_max),
+        (args.nocyc_delta0_min, args.nocyc_delta0_max),
+        (args.nocyc_delta1_min, args.nocyc_delta1_max),
+    ]
+
+    if args.fit_planet:
+        bounds_list += planet_bounds(args, planet_p)
+
+    return bounds_list
+
+def build_bounds_list_cyc(args, stds, means, T, planet_p):
+    rvjit_max = args.rvjit_max_frac * stds[0]
+    rhkjit_max = args.rhkjit_max_frac * stds[1]
+    alpha_0_max = args.alpha0_max_frac * stds[0]
+    alpha_1_max = args.alpha1_max_frac * stds[1]
+    beta_0_max = args.beta0_max_frac * stds[0]
+    b_max = args.cycle_b_max_drift / T
+    a0_max = args.a0_max_frac * stds[0]
+    a1_max = args.a1_max_frac * stds[1]
+    delta0_half = args.delta0_max_frac * stds[0]
+    delta1_half = args.delta1_max_frac * stds[1]
+
+    bounds_list = [
         (0.0, rvjit_max),
         (0.0, rhkjit_max),
         (args.prot_min, args.prot_max),
@@ -102,12 +158,221 @@ def build_bounds_list(args, stds):
         (0.0, alpha_0_max),
         (-alpha_1_max, alpha_1_max),
         (-beta_0_max, beta_0_max),
-        (args.delta0_min, args.delta0_max),
-        (args.delta1_min, args.delta1_max),
+        (-b_max, b_max),
+        (args.Pcyc_min, args.Pcyc_max),
+        (args.phi_min, args.phi_max),
+        (-a0_max, a0_max),
+        (-a1_max, a1_max),
+        (means[0] - delta0_half, means[0] + delta0_half),
+        (means[1] - delta1_half, means[1] + delta1_half),
     ]
 
+    if args.fit_planet:
+        bounds_list += planet_bounds(args, planet_p)
+
+    return bounds_list
+
+def build_bounds_list_nonstat2(args, stds, means, T, planet_p):
+    rvjit_max = args.rvjit_max_frac * stds[0]
+    rhkjit_max = args.rhkjit_max_frac * stds[1]
+    alpha_0_max = args.alpha0_max_frac * stds[0]
+    alpha_1_max = args.alpha1_max_frac * stds[1]
+    beta_0_max = args.beta0_max_frac * stds[0]
+    b_max = args.cycle_b_max_drift / T
+    a0_max = args.a0_max_frac * stds[0]
+    a1_max = args.a1_max_frac * stds[1]
+    delta0_half = args.delta0_max_frac * stds[0]
+    delta1_half = args.delta1_max_frac * stds[1]
+
+    bounds_list = [
+        (0.0, rvjit_max),
+        (0.0, rhkjit_max),
+        (-b_max, b_max),
+        (args.nonstat2_Pcyc_min, args.Pcyc_max),
+        (args.phi_min, args.phi_max),
+        (args.cycle_c_min, args.cycle_c_max),
+        (args.prot_min, args.prot_max),
+        (args.rho_min, args.rho_max),
+        (args.eta_min, args.eta_max),
+        (0.0, alpha_0_max),
+        (-alpha_1_max, alpha_1_max),
+        (-beta_0_max, beta_0_max),
+        (-a0_max, a0_max),
+        (-a1_max, a1_max),
+        (means[0] - delta0_half, means[0] + delta0_half),
+        (means[1] - delta1_half, means[1] + delta1_half),
+    ]
+
+    if args.fit_planet:
+        bounds_list += planet_bounds(args, planet_p)
+
+    return bounds_list
+
+def clip_cycle_seed(cycle_params, bounds_list, b_idx):
+    # Keep the cycle warm start inside the (data-relative) bounds; b and P sit
+    # at b_idx and b_idx+1 (8 for cyc)
+    rv_offset0, rv_amp0, rhk_offset0, rhk_amp0, b0, P0, phi0 = cycle_params
+    phi0 = (phi0 + np.pi) % (2 * np.pi) - np.pi
+    b0 = np.clip(b0, bounds_list[b_idx][0], bounds_list[b_idx][1])
+    P0 = np.clip(P0, bounds_list[b_idx + 1][0], bounds_list[b_idx + 1][1])
+    return rv_offset0, rv_amp0, rhk_offset0, rhk_amp0, b0, P0, phi0
+
+def planet_seed(args, gls_fn, C, t_full, y_full, series_index, mean0, mean1, planet_p, bounds_list, rv_std):
+    # Pipeline 2: planet A/B start at their generalised least-squares values
+    # given the starting GP and mean model
+    if not args.fit_planet:
+        return 0.0, 0.0
+    resid = y_full.copy()
+    resid[series_index[0]] -= mean0
+    resid[series_index[1]] -= mean1
+    A, B = gls_fn(C, t_full, resid, series_index, planet_p, rv_std)
+    return np.clip(A, bounds_list[-2][0], bounds_list[-2][1]), np.clip(B, bounds_list[-1][0], bounds_list[-1][1])
+
+def warm_start_nonstat2(args, t_full, cycle_params, bounds_list, stds, T):
+    # Same warm start as nonstat2/main_nonstat.py
+    rv_offset0, rv_amp0, rhk_offset0, rhk_amp0, b0, P0, phi0 = cycle_params
+
+    # The covariance envelope is core(t)*core(t'), so (unlike the mean) the
+    # sign of the core matters: orient it to rise with activity (RHK)
+    if rhk_amp0 < 0:
+        b0, phi0, rv_amp0, rhk_amp0 = -b0, phi0 + np.pi, -rv_amp0, -rhk_amp0
+    phi0 = (phi0 + np.pi) % (2 * np.pi) - np.pi
+    b0 = np.clip(b0, bounds_list[2][0], bounds_list[2][1])
+    P0 = np.clip(P0, bounds_list[3][0], bounds_list[3][1])
+
+    # c0 puts the core's minimum 1.0 above 0 (a margin of 0.1 stalls the
+    # optimiser at c=0; 1.0 converges from one run); then map fit_cycle's
+    # offset + amp*(b t + sin) onto d + a*(b t + sin + c)/N exactly
+    if args.cycle_c0 is None:
+        c0 = -np.min(b0 * t_full + np.sin(2 * np.pi * t_full / P0 + phi0)) + 1.0
+    else:
+        c0 = args.cycle_c0
+    N0 = 1 + c0 + np.abs(b0) * T
+    rv_amp0, rhk_amp0 = rv_amp0 * N0, rhk_amp0 * N0
+    rv_offset0, rhk_offset0 = rv_offset0 - rv_amp0 * c0 / N0, rhk_offset0 - rhk_amp0 * c0 / N0
+
+    # QP amplitudes scaled so the initial GP variance matches the data despite
+    # the envelope being < 1
+    core_rms0 = np.sqrt(np.mean(mfn2.shared_core_pos(t_full, b0, P0, phi0, c0, T)**2))
+    qp_amps0 = np.array([stds[0], stds[1]]) / core_rms0
+    qp_beta0 = np.array([stds[0], 0.0]) / core_rms0
+
+    return b0, P0, phi0, c0, rv_amp0, rhk_amp0, rv_offset0, rhk_offset0, qp_amps0, qp_beta0
+
+def test_loglike_nonstat2(xbest, t_full, y_full, series_index, C, T, fit_planet):
+    # Forward pass of mfn2.negloglike_nonstat, but with the training T fixed
+    # (negloglike_nonstat recomputes T = max(t_full) from the data it gets)
+    params, _ = mfn2.get_opt_params_nonstat(C)
+    n = len(params)
+    b, P, phi, c = C.get_param(['rot.nonstat_b', 'rot.nonstat_P', 'rot.nonstat_phi', 'rot.nonstat_c'])
+
+    y_model = y_full.copy()
+    if fit_planet:
+        y_model[series_index[0]] -= mfn2.planet_injection(t_full[series_index[0]], xbest[n+4], xbest[n+5], xbest[n+6])
+    y_model[series_index[0]] -= xbest[n] * mfn2.shared_core_pos(t_full[series_index[0]], b, P, phi, c, T) + xbest[n+2]
+    y_model[series_index[1]] -= xbest[n+1] * mfn2.shared_core_pos(t_full[series_index[1]], b, P, phi, c, T) + xbest[n+3]
+
+    return C.loglike(y_model)
+
+def fit_nocyc(args, t_full, y_full, yerr_full, series_index, stds, planet_p, rv_std):
+    bounds_list = build_bounds_list_nocyc(args, stds, planet_p)
+    d0, d1 = np.mean(y_full[series_index[0]]), np.mean(y_full[series_index[1]])
+
+    C = cov.Cov(
+                t_full,
+                err=term.Error(yerr_full),
+                rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
+                rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
+                rot = MultiSeriesKernel(term.MEPKernel(args.sig,args.prot,args.rho,args.eta), series_index,
+                        np.array([stds[0], stds[1]]),
+                        np.array([stds[0], 0.0])
+                    ),
+                )
+
+    A0, B0 = planet_seed(args, mf.gls_planet_amplitudes, C, t_full, y_full, series_index, d0, d1, planet_p, bounds_list, rv_std)
+
+    return mf.optimise_params(t_full, y_full, series_index, C, bounds_list,
+                            delta_0=d0,
+                            delta_1=d1,
+                            planet_p=planet_p if args.fit_planet else 40.05,
+                            planet_A=A0,
+                            planet_B=B0,
+                            fit_planet=args.fit_planet,
+                            change_C=args.change_C)
+
+def fit_cyc(args, t_full, y_full, yerr_full, series_index, stds, planet_p, cycle_params, rv_std):
+    means = [np.mean(y_full[series_index[0]]), np.mean(y_full[series_index[1]])]
+    bounds_list = build_bounds_list_cyc(args, stds, means, np.max(t_full), planet_p)
+    rv_offset0, rv_amp0, rhk_offset0, rhk_amp0, b0, P0, phi0 = clip_cycle_seed(cycle_params, bounds_list, 8)
+
+    C = cov.Cov(
+                t_full,
+                err=term.Error(yerr_full),
+                rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
+                rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
+                rot = MultiSeriesKernel(term.MEPKernel(args.sig,args.prot,args.rho,args.eta), series_index,
+                        np.array([stds[0], stds[1]]),
+                        np.array([stds[0], 0.0])
+                    ),
+                )
+
+    A0, B0 = planet_seed(args, mf.gls_planet_amplitudes, C, t_full, y_full, series_index,
+                         rv_amp0 * mf.shared_core(t_full[series_index[0]], b0, P0, phi0) + rv_offset0,
+                         rhk_amp0 * mf.shared_core(t_full[series_index[1]], b0, P0, phi0) + rhk_offset0,
+                         planet_p, bounds_list, rv_std)
+
+    return mf.optimise_params_cyc(t_full, y_full, series_index, C, bounds_list,
+                            b=b0,
+                            P=P0,
+                            phi=phi0,
+                            a0=rv_amp0,
+                            a1=rhk_amp0,
+                            d0=rv_offset0,
+                            d1=rhk_offset0,
+                            planet_p=planet_p if args.fit_planet else args.cycle_P0,
+                            planet_A=A0,
+                            planet_B=B0,
+                            fit_planet=args.fit_planet,
+                            change_C=args.change_C)
+
+def fit_nonstat2(args, t_full, y_full, yerr_full, series_index, stds, planet_p, cycle_params, rv_std):
+    T = np.max(t_full)
+    means = [np.mean(y_full[series_index[0]]), np.mean(y_full[series_index[1]])]
+    bounds_list = build_bounds_list_nonstat2(args, stds, means, T, planet_p)
+    b0, P0, phi0, c0, a0, a1, d0, d1, qp_amps0, qp_beta0 = warm_start_nonstat2(args, t_full, cycle_params, bounds_list, stds, T)
+
+    C = cov.Cov(
+                t_full,
+                err=term.Error(yerr_full),
+                rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
+                rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
+                rot = term.SimpleProductKernel(
+                        nonstat=mfn2.make_nonstat_kernel(T, b0, P0, phi0, c0),
+                        qp=MultiSeriesKernel(term.MEPKernel(args.sig,args.prot,args.rho,args.eta), series_index,
+                                qp_amps0,
+                                qp_beta0
+                            ),
+                    ),
+                )
+
+    A0, B0 = planet_seed(args, mfn2.gls_planet_amplitudes, C, t_full, y_full, series_index,
+                         a0 * mfn2.shared_core_pos(t_full[series_index[0]], b0, P0, phi0, c0, T) + d0,
+                         a1 * mfn2.shared_core_pos(t_full[series_index[1]], b0, P0, phi0, c0, T) + d1,
+                         planet_p, bounds_list, rv_std)
+
+    return mfn2.optimise_params_nonstat(t_full, y_full, series_index, C, bounds_list,
+                            a0=a0,
+                            a1=a1,
+                            d0=d0,
+                            d1=d1,
+                            planet_p=planet_p if args.fit_planet else args.cycle_P0,
+                            planet_A=A0,
+                            planet_B=B0,
+                            fit_planet=args.fit_planet,
+                            change_C=args.change_C)
+
 def main():
-   
+
     args = build_parser().parse_args()
 
     load_result = mf.load_and_norm_data(
@@ -117,7 +382,7 @@ def main():
                         inject_planet=args.inject_planet,
                         planet_params=(args.planet_period, args.planet_A, args.planet_B),
                     )
-    
+
 
     t_full, y_full, yerr_full, series_index = load_result
     rv_std = 1.0
@@ -133,9 +398,10 @@ def main():
     perm = rng.permutation(N)
     fold_ids = np.empty(N, dtype=int)
     fold_ids[perm] = np.arange(N) % 12
-    
-    loglike_total_cyc = 0
+
     loglike_total_nocyc = 0
+    loglike_total_cyc = 0
+    loglike_total_nonstat2 = 0
     cv_rows = []
 
 
@@ -157,45 +423,17 @@ def main():
 
         t_full_train, y_full_train, yerr_full_train, series_index_train = cov.merge_series(t_train, y_train, yerr_train)
         t_full_test, y_full_test, yerr_full_test, series_index_test = cov.merge_series(t_test, y_test, yerr_test)
-        
+
         stds = [np.std(y_full_train[series_index_train[0]]), np.std(y_full_train[series_index_train[1]])]
-        bounds_list_cyc = build_bounds_list(args, stds)
-        bounds_list_nocyc = [(0.0, args.rvjit_max_frac * stds[0]),
-        (0.0, args.rhkjit_max_frac * stds[1]),
-        (args.prot_min, args.prot_max),
-        (args.rho_min, 100.0),
-        (args.eta_min, 3.0),
-        (0.0, args.alpha0_max_frac * stds[0]),
-        (-args.alpha1_max_frac * stds[1], args.alpha1_max_frac * stds[1]),
-        (-args.beta0_max_frac * stds[0], args.beta0_max_frac * stds[0]),
-        (args.delta0_min, args.delta0_max),
-        (-5.0, 5.0),
-        ]
 
         planet_p_fold = args.planet_p
         if args.fit_planet and planet_p_fold is None:
             periods, _ = mf.period_guess(t_full_train, y_full_train, yerr_full_train, series_index_train, PMIN=1.1, PMAX=310.0, MAX_FAP=1e-5, MAX_NPL=2, plot=False)
             planet_p_fold = float(periods[1]) if len(periods) >= 2 else float(periods[0])
 
-        C = cov.Cov(
-                    t_full_train,
-                    err=term.Error(yerr_full_train),
-                    rv_jit=term.InstrumentJitter(series_index_train[0], args.rvjit_frac * stds[0]),
-                    rhk_jit=term.InstrumentJitter(series_index_train[1], args.rhkjit_frac * stds[1]),
-                    rot = MultiSeriesKernel(term.MEPKernel(args.sig,args.prot,args.rho,args.eta), series_index_train, 
-                            np.array([stds[0], stds[1]]), 
-                            np.array([stds[0], 0.0])
-                        ),
-                    )
-        
-        xbest, C = mf.optimise_params(t_full_train, y_full_train, series_index_train, C, bounds_list_nocyc,
-                                delta_0=args.delta_0,
-                                delta_1=args.delta_1,
-                                planet_p=planet_p_fold,
-                                planet_A=args.planet_A_fit,
-                                planet_B=args.planet_B_fit,
-                                fit_planet=args.fit_planet,
-                                change_C=args.change_C)
+        # NO CYCLE
+
+        xbest, C = fit_nocyc(args, t_full_train, y_full_train, yerr_full_train, series_index_train, stds, planet_p_fold, rv_std)
 
         C_test = cov.Cov(
                                 t_full_test,
@@ -212,37 +450,14 @@ def main():
         loglike_total_nocyc = loglike_total_nocyc + test_loglike_nocyc
         print(f"fold {fold:02d} [no_cycle]: test loglike={test_loglike_nocyc:.6f}")
         cv_rows.append({"fold": fold, "mode": "no_cycle", "test_loglike": test_loglike_nocyc, "planet_p": planet_p_fold})
-        fit_plot_name_optim = f"CV/optim_fit_plot_False_{fold}.png"
+        fit_plot_name_optim = f"CV/optim_fit_plot_no_cycle_{fold}.png"
         mf.plot_fit(t_full_train, y_full_train, yerr_full_train, series_index_train, C, xbest, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
 
-        # CYCLE PART
+        # CYC (simultaneous GP + cycle mean-term optimisation)
 
-        cycle_out_name = f"CV/cycle_fit_{fold}.png"
-        rv_fit, rhk_fit, params = mf.fit_cycle(t_full_train, y_full_train, series_index_train, b0=args.cycle_b0, P0=args.cycle_P0, phi0=args.cycle_phi0, plot=args.cycle_plot, print_results=args.cycle_print_results, output_name=cycle_out_name, return_fit=True)
-        y_full_train[series_index_train[0]] = y_full_train[series_index_train[0]] - rv_fit
-        y_full_train[series_index_train[1]] = y_full_train[series_index_train[1]] - rhk_fit
+        _, _, cycle_params = mf.fit_cycle(t_full_train, y_full_train, series_index_train, b0=args.cycle_b0, P0=args.cycle_P0, phi0=args.cycle_phi0, plot=False, print_results=False, return_fit=True)
 
-        stds = [np.std(y_full_train[series_index_train[0]]), np.std(y_full_train[series_index_train[1]])]
-
-        C = cov.Cov(
-                    t_full_train,
-                    err=term.Error(yerr_full_train),
-                    rv_jit=term.InstrumentJitter(series_index_train[0], args.rvjit_frac * stds[0]),
-                    rhk_jit=term.InstrumentJitter(series_index_train[1], args.rhkjit_frac * stds[1]),
-                    rot = MultiSeriesKernel(term.MEPKernel(args.sig,args.prot,args.rho,args.eta), series_index_train, 
-                            np.array([stds[0], stds[1]]), 
-                            np.array([stds[0], 0.0])
-                        ),
-                    )
-        
-        xbest, C = mf.optimise_params(t_full_train, y_full_train, series_index_train, C, bounds_list_cyc,
-                                delta_0=args.delta_0,
-                                delta_1=args.delta_1,
-                                planet_p=planet_p_fold,
-                                planet_A=args.planet_A_fit,
-                                planet_B=args.planet_B_fit,
-                                fit_planet=args.fit_planet,
-                                change_C=args.change_C)
+        xbest, C = fit_cyc(args, t_full_train, y_full_train, yerr_full_train, series_index_train, stds, planet_p_fold, cycle_params, rv_std)
 
         C_test = cov.Cov(
                                 t_full_test,
@@ -255,23 +470,47 @@ def main():
                                     ),
                                 )
 
-
-        a1, c1, a2, c2, b, P, phi = params
-        y_full_test[series_index_test[0]] = y_full_test[series_index_test[0]] - mf.model_rv(t_full_test[series_index_test[0]], a1, c1, b, P, phi)
-        y_full_test[series_index_test[1]] = y_full_test[series_index_test[1]] - mf.model_rhk(t_full_test[series_index_test[1]], a2, c2, b, P, phi)
-
-        test_loglike_cyc = -1*mf.negloglike_nocyc(xbest, t_full_test, y_full_test, series_index_test, C_test, rv_std, inject_planet=args.fit_planet)[0]
+        test_loglike_cyc = -1*mf.negloglike_cyc(xbest, t_full_test, y_full_test, series_index_test, C_test, rv_std, inject_planet=args.fit_planet)[0]
         loglike_total_cyc = loglike_total_cyc + test_loglike_cyc
-        print(f"fold {fold:02d} [cycle]: test loglike={test_loglike_cyc:.6f}")
-        cv_rows.append({"fold": fold, "mode": "cycle", "test_loglike": test_loglike_cyc, "planet_p": planet_p_fold})
+        print(f"fold {fold:02d} [cyc]: test loglike={test_loglike_cyc:.6f}")
+        cv_rows.append({"fold": fold, "mode": "cyc", "test_loglike": test_loglike_cyc, "planet_p": planet_p_fold})
 
-        fit_plot_name_optim = f"CV/optim_fit_plot_True_{fold}.png"
-        mf.plot_fit(t_full_train, y_full_train, yerr_full_train, series_index_train, C, xbest, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
+        fit_plot_name_optim = f"CV/optim_fit_plot_cyc_{fold}.png"
+        mf.plot_fit_cyc(t_full_train, y_full_train, yerr_full_train, series_index_train, C, xbest, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
 
-        # np.save("results/xbest_" + args.output_name + ".npy", xbest_all)
+        # NONSTAT2 (positive normalised core modulates the covariance and the mean, nonstat2/)
 
-    print(f"Total log-likelihood with cycle fit: {loglike_total_cyc}")
-    print(f"Total log-likelihood without cycle fit: {loglike_total_nocyc}")
+        T_train = np.max(t_full_train)
+        xbest, C = fit_nonstat2(args, t_full_train, y_full_train, yerr_full_train, series_index_train, stds, planet_p_fold, cycle_params, rv_std)
+
+        # T_train (not max(t_test)) so the test fold is scored with the fitted model
+        C_test = cov.Cov(
+                                t_full_test,
+                                err=term.Error(yerr_full_test),
+                                rv_jit=term.InstrumentJitter(series_index_test[0], xbest[0]),
+                                rhk_jit=term.InstrumentJitter(series_index_test[1], xbest[1]),
+                                rot = term.SimpleProductKernel(
+                                        nonstat=mfn2.make_nonstat_kernel(T_train, xbest[2], xbest[3], xbest[4], xbest[5]),
+                                        qp=MultiSeriesKernel(term.MEPKernel(args.sig,xbest[6],xbest[7],xbest[8]), series_index_test,
+                                                np.array([xbest[9], xbest[10]]),
+                                                np.array([xbest[11], 0.0])
+                                            ),
+                                    ),
+                                )
+
+        test_loglike_ns2 = test_loglike_nonstat2(xbest, t_full_test, y_full_test, series_index_test, C_test, T_train, args.fit_planet)
+        loglike_total_nonstat2 = loglike_total_nonstat2 + test_loglike_ns2
+        print(f"fold {fold:02d} [nonstat2]: test loglike={test_loglike_ns2:.6f}")
+        cv_rows.append({"fold": fold, "mode": "nonstat2", "test_loglike": test_loglike_ns2, "planet_p": planet_p_fold})
+
+        fit_plot_name_optim = f"CV/optim_fit_plot_nonstat2_{fold}.png"
+        mfn2.plot_fit_nonstat(t_full_train, y_full_train, yerr_full_train, series_index_train, C, xbest, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
+
+        plt.close("all")
+
+    print(f"Total log-likelihood [no_cycle]: {loglike_total_nocyc}")
+    print(f"Total log-likelihood [cyc]: {loglike_total_cyc}")
+    print(f"Total log-likelihood [nonstat2]: {loglike_total_nonstat2}")
 
     try:
         import pandas as pd
@@ -282,6 +521,8 @@ def main():
         print(f"\nCould not save CV results CSV: {exc}")
         print(cv_rows)
 
+    # Whole-dataset refit + AIC/BIC for all three models
+
     T = [t,t]
     Y = [y_rv, y_rhk]
     Yerr = [yerr_rv, yerr_rhk]
@@ -290,78 +531,58 @@ def main():
 
     stds = [np.std(y_full[series_index[0]]), np.std(y_full[series_index[1]])]
 
-    bounds_list = build_bounds_list(args, stds)
-    C = cov.Cov(
-                t_full,
-                err=term.Error(yerr_full),
-                rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
-                rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
-                rot = MultiSeriesKernel(term.MEPKernel(args.sig,args.prot,args.rho,args.eta), series_index, 
-                        np.array([stds[0], stds[1]]), 
-                        np.array([stds[0], 0.0])
-                    ),
-                )
+    n_train = len(y_full)
 
-    xbest, C = mf.optimise_params(t_full, y_full, series_index, C, bounds_list_cyc, 
-                            delta_0=args.delta_0,
-                            delta_1=args.delta_1,
-                            planet_p=args.planet_p,
-                            planet_A=args.planet_A_fit,
-                            planet_B=args.planet_B_fit,
-                            fit_planet=args.fit_planet,
-                            change_C=args.change_C)
+    planet_p = args.planet_p
+    if args.fit_planet and planet_p is None:
+        periods, _ = mf.period_guess(t_full, y_full, yerr_full, series_index, PMIN=1.1, PMAX=310.0, MAX_FAP=1e-5, MAX_NPL=2, plot=False)
+        planet_p = float(periods[1]) if len(periods) >= 2 else float(periods[0])
 
-    print("xbest no cycle: ", xbest)
+    # NO CYCLE
+
+    xbest, C = fit_nocyc(args, t_full, y_full, yerr_full, series_index, stds, planet_p, rv_std)
+
+    print("xbest no_cycle: ", xbest)
 
     loglike_nocyc = -mf.negloglike_nocyc(
-    xbest, t_full, y_full, series_index, C, rv_std, inject_planet=args.fit_planet)[0]
-
-    n_train = len(y_full)  
-    k_gp = len(xbest)
-
-    aic_nocyc = 2 * k_gp - 2 * loglike_nocyc
-    bic_nocyc = k_gp * np.log(n_train) - 2 * loglike_nocyc
-    
-    # CYCLE PART
-
-    rv_fit, rhk_fit, params = mf.fit_cycle(t_full, y_full, series_index, b0=args.cycle_b0, P0=args.cycle_P0, phi0=args.cycle_phi0, plot=False, print_results=args.cycle_print_results, output_name=cycle_out_name, return_fit=True)
-    y_full[series_index[0]] = y_full[series_index[0]] - rv_fit
-    y_full[series_index[1]] = y_full[series_index[1]] - rhk_fit
-
-    stds = [np.std(y_full[series_index[0]]), np.std(y_full[series_index[1]])]
-    C = cov.Cov(
-                t_full,
-                err=term.Error(yerr_full),
-                rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
-                rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
-                rot = MultiSeriesKernel(term.MEPKernel(args.sig,args.prot,args.rho,args.eta), series_index, 
-                        np.array([stds[0], stds[1]]), 
-                        np.array([stds[0], 0.0])
-                    ),
-                )
-
-    xbest, C = mf.optimise_params(t_full, y_full, series_index, C, bounds_list_cyc, 
-                            delta_0=args.delta_0,
-                            delta_1=args.delta_1,
-                            planet_p=args.planet_p,
-                            planet_A=args.planet_A_fit,
-                            planet_B=args.planet_B_fit,
-                            fit_planet=args.fit_planet,
-                            change_C=args.change_C)
-
-
-    print("xbest with cycle: ", xbest)
-    loglike_cyc = -mf.negloglike_nocyc(
         xbest, t_full, y_full, series_index, C, rv_std, inject_planet=args.fit_planet)[0]
 
-    k_cycle = k_gp + 7   # a1, c1, a2, c2, b, P, phi
-    aic_cyc = 2 * k_cycle - 2 * loglike_cyc
-    bic_cyc = k_cycle * np.log(n_train) - 2 * loglike_cyc
-        
-    print("BIC with cycle fit: ", bic_cyc)
-    print("BIC without cycle fit: ", bic_nocyc)
-    print("AIC with cycle fit: ", aic_cyc)
-    print("AIC without cycle fit: ", aic_nocyc)
+    k_nocyc = len(xbest)
+    aic_nocyc = 2 * k_nocyc - 2 * loglike_nocyc
+    bic_nocyc = k_nocyc * np.log(n_train) - 2 * loglike_nocyc
+
+    # CYC
+
+    _, _, cycle_params = mf.fit_cycle(t_full, y_full, series_index, b0=args.cycle_b0, P0=args.cycle_P0, phi0=args.cycle_phi0, plot=False, print_results=False, return_fit=True)
+
+    xbest, C = fit_cyc(args, t_full, y_full, yerr_full, series_index, stds, planet_p, cycle_params, rv_std)
+
+    print("xbest cyc: ", xbest)
+    loglike_cyc = -mf.negloglike_cyc(
+        xbest, t_full, y_full, series_index, C, rv_std, inject_planet=args.fit_planet)[0]
+
+    k_cyc = len(xbest)
+    aic_cyc = 2 * k_cyc - 2 * loglike_cyc
+    bic_cyc = k_cyc * np.log(n_train) - 2 * loglike_cyc
+
+    # NONSTAT2
+
+    xbest, C = fit_nonstat2(args, t_full, y_full, yerr_full, series_index, stds, planet_p, cycle_params, rv_std)
+
+    print("xbest nonstat2: ", xbest)
+    loglike_nonstat2 = -mfn2.negloglike_nonstat(
+        xbest, t_full, y_full, series_index, C, rv_std, inject_planet=args.fit_planet)[0]
+
+    k_nonstat2 = len(xbest)
+    aic_nonstat2 = 2 * k_nonstat2 - 2 * loglike_nonstat2
+    bic_nonstat2 = k_nonstat2 * np.log(n_train) - 2 * loglike_nonstat2
+
+    print("BIC [no_cycle]: ", bic_nocyc)
+    print("BIC [cyc]: ", bic_cyc)
+    print("BIC [nonstat2]: ", bic_nonstat2)
+    print("AIC [no_cycle]: ", aic_nocyc)
+    print("AIC [cyc]: ", aic_cyc)
+    print("AIC [nonstat2]: ", aic_nonstat2)
 
 if __name__ == "__main__":
     main()

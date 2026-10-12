@@ -1,21 +1,19 @@
-"""Injection-recovery grid sweep comparing the cyc, nonstat, and no_cycle models.
+"""Injection-recovery grid sweep comparing the cyc, nonstat2, and no_cycle models.
 
 For each (period, semi-amplitude K, orbital phase) combination on a log-spaced
 grid, injects a synthetic planet into the Solar RV data and fits it with
-whichever models --models selects: cyc (cyc_pipeline2/functions.py),
-nonstat (nonstationary/nonstationary_pipeline2/functions_nonstat.py),
-nonstat2 (nonstationary_2/functions_nonstat.py), and no_cycle
-(cyc_pipeline2/functions.py's bare-GP branch), using the same pipeline-2
-search each single-injection script (cyc_pipeline2/main_cycle_likelihood.py
-[--no-fit-cycle] / nonstationary/nonstationary_pipeline2/main_nonstat.py /
-nonstationary_2/main_nonstat.py) uses: a blind periodogram, then one
+whichever models --models selects: cyc (cyc/functions.py),
+nonstat2 (nonstat2/functions_nonstat.py), and no_cycle
+(cyc/functions.py's bare-GP branch), using the same
+search each single-injection script (cyc/main_cycle_likelihood.py
+[--no-fit-cycle] / nonstat2/main_nonstat.py) uses: a blind periodogram, then one
 L-BFGS-B start per period guess with planet A/B seeded by generalised least
 squares, optimised on rescaled parameters.
 Results are appended to a CSV as they complete, so the sweep can be
 interrupted and resumed by simply re-running the same command. Resumability
 is tracked per (combo, mode): re-running with a different --models against
 an existing --output-csv only computes whichever modes are still missing for
-each combo, so e.g. adding no_cycle to a CSV that already has cyc/nonstat
+each combo, so e.g. adding no_cycle to a CSV that already has cyc/nonstat2
 never recomputes those.
 
 One planet is assumed present: a planet is considered "recovered" if the
@@ -38,7 +36,7 @@ for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
 import matplotlib
 matplotlib.use("Agg")
 
-# the model dirs (cyc_pipeline2, nonstationary*) live in the parent folder
+# the model dirs (cyc, nonstat2) live in the parent folder
 _PARENT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 from spleaf import cov, term
@@ -50,18 +48,15 @@ import multiprocessing as mp
 
 
 def _load_module(name, relpath):
-    # The pipeline-2 modules share their names (functions / functions_nonstat)
-    # with the old ones, so load each explicitly from file under a distinct name
+    # The model dirs aren't packages, so load each module explicitly from file
     spec = importlib.util.spec_from_file_location(name, os.path.join(_PARENT, relpath))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-mf = _load_module("functions_pipeline2", os.path.join("cyc_pipeline2", "functions.py"))
-mfn = _load_module("functions_nonstat_pipeline2",
-                   os.path.join("nonstationary", "nonstationary_pipeline2", "functions_nonstat.py"))
-mfn2 = _load_module("functions_nonstat_2", os.path.join("nonstationary_2", "functions_nonstat.py"))
+mf = _load_module("functions_cyc", os.path.join("cyc", "functions.py"))
+mfn2 = _load_module("functions_nonstat2", os.path.join("nonstat2", "functions_nonstat.py"))
 
 
 class MultiSeriesKernel(term.MultiSeriesKernel):
@@ -86,14 +81,14 @@ CSV_FIELDS = [
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="Injection-recovery grid sweep comparing the cyc, nonstat, and no_cycle models."
+        description="Injection-recovery grid sweep comparing the cyc, nonstat2, and no_cycle models."
     )
 
     parser.add_argument("--path", default="data/Solar_Data")
     parser.add_argument("--star-name", default="Sun")
     parser.add_argument("--normalise", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--models", type=str, default="cyc,nonstat,no_cycle",
-                         help="Comma-separated subset of cyc,nonstat,nonstat2,no_cycle to fit per combo.")
+    parser.add_argument("--models", type=str, default="cyc,nonstat2,no_cycle",
+                         help="Comma-separated subset of cyc,nonstat2,no_cycle to fit per combo.")
 
     # Grid
     parser.add_argument("--n-period", type=int, default=10)
@@ -131,8 +126,8 @@ def build_parser():
     parser.add_argument("--alpha1-max-frac", type=float, default=5.0)
     parser.add_argument("--beta0-max-frac", type=float, default=10.0)
 
-    # cyc / nonstat / nonstat2 shared cycle-term bounds, data-relative as in
-    # cyc_pipeline2/main_cycle_likelihood.py / nonstationary_pipeline2/main_nonstat.py:
+    # cyc / nonstat2 shared cycle-term bounds, data-relative as in
+    # cyc/main_cycle_likelihood.py:
     # |b| <= drift/T, |a| <= frac*std, delta within mean +/- frac*std
     parser.add_argument("--cycle-b-max-drift", type=float, default=5.0)
     parser.add_argument("--Pcyc-min", type=float, default=3000.0)
@@ -144,11 +139,7 @@ def build_parser():
     parser.add_argument("--delta0-max-frac", type=float, default=10.0)
     parser.add_argument("--delta1-max-frac", type=float, default=10.0)
 
-    # nonstat-only bounds
-    parser.add_argument("--mu-min", type=float, default=-5.0)
-    parser.add_argument("--mu-max", type=float, default=5.0)
-
-    # nonstat2-only bounds / warm start (same as CV/CV_nonstat_2.py)
+    # nonstat2-only bounds / warm start (same as nonstat2/main_nonstat.py)
     parser.add_argument("--cycle-c0", type=float, default=None)
     parser.add_argument("--nonstat2-Pcyc-min", type=float, default=3000.0)
     parser.add_argument("--cycle-c-min", type=float, default=0.0)
@@ -157,7 +148,7 @@ def build_parser():
     # no_cycle-only bounds (main.py --no-fit-cycle widens rho/eta -- no cycle
     # term to absorb long-period variability, so the GP's own rho/eta need
     # more room -- and uses its own delta0/delta1 bounds; rho_min/eta_min and
-    # everything else above stay shared with cyc/nonstat)
+    # everything else above stay shared with cyc/nonstat2)
     parser.add_argument("--nocyc-rho-max", type=float, default=100.0)
     parser.add_argument("--nocyc-eta-max", type=float, default=3.0)
     parser.add_argument("--nocyc-delta0-min", type=float, default=-0.5)
@@ -177,7 +168,6 @@ def build_parser():
     parser.add_argument("--cycle-b0", type=float, default=0.0)
     parser.add_argument("--cycle-P0", type=float, default=4000.0)
     parser.add_argument("--cycle-phi0", type=float, default=0.0)
-    parser.add_argument("--mu0", type=float, default=0.0)
 
     parser.add_argument("--output-csv", default="inj_rec/injection_recovery.csv")
     parser.add_argument("--n-workers", type=int, default=None)
@@ -235,41 +225,6 @@ def build_bounds_list_cyc(args, stds, means, T, period_bounds, amp_bound, fit_pl
         (-b_max, b_max),
         (args.Pcyc_min, args.Pcyc_max),
         (args.phi_min, args.phi_max),
-        (-a0_max, a0_max),
-        (-a1_max, a1_max),
-        (means[0] - delta0_half, means[0] + delta0_half),
-        (means[1] - delta1_half, means[1] + delta1_half),
-    ]
-    if fit_planet:
-        bounds += [period_bounds, (-amp_bound, amp_bound), (-amp_bound, amp_bound)]
-    return bounds
-
-
-def build_bounds_list_nonstat(args, stds, means, T, period_bounds, amp_bound, fit_planet=True):
-    rvjit_max = args.rvjit_max_frac * stds[0]
-    rhkjit_max = args.rhkjit_max_frac * stds[1]
-    alpha_0_max = args.alpha0_max_frac * stds[0]
-    alpha_1_max = args.alpha1_max_frac * stds[1]
-    beta_0_max = args.beta0_max_frac * stds[0]
-    b_max = args.cycle_b_max_drift / T
-    a0_max = args.a0_max_frac * stds[0]
-    a1_max = args.a1_max_frac * stds[1]
-    delta0_half = args.delta0_max_frac * stds[0]
-    delta1_half = args.delta1_max_frac * stds[1]
-
-    bounds = [
-        (0.0, rvjit_max),
-        (0.0, rhkjit_max),
-        (args.mu_min, args.mu_max),
-        (-b_max, b_max),
-        (args.Pcyc_min, args.Pcyc_max),
-        (args.phi_min, args.phi_max),
-        (args.prot_min, args.prot_max),
-        (args.rho_min, args.rho_max),
-        (args.eta_min, args.eta_max),
-        (0.0, alpha_0_max),
-        (-alpha_1_max, alpha_1_max),
-        (-beta_0_max, beta_0_max),
         (-a0_max, a0_max),
         (-a1_max, a1_max),
         (means[0] - delta0_half, means[0] + delta0_half),
@@ -438,88 +393,13 @@ def fit_cyc(t_full, y_full, yerr_full, series_index, stds, args, planet_guess, c
     return xbest_all, best_loglike, diagnostics
 
 
-def fit_nonstat(t_full, y_full, yerr_full, series_index, stds, args, planet_guess, cycle_seed, amp_bound, rv_std,
-                 fit_planet=True, planet_AB=None):
-    rv_offset0, rv_amp0, rhk_offset0, rhk_amp0, b0, P0, phi0 = cycle_seed
-    means = [np.mean(y_full[series_index[0]]), np.mean(y_full[series_index[1]])]
-    T = np.max(t_full)
-
-    # Keep the warm start inside the (data-relative) bounds
-    ref_bounds = build_bounds_list_nonstat(args, stds, means, T, None, amp_bound, fit_planet=False)
-    phi0 = (phi0 + np.pi) % (2 * np.pi) - np.pi
-    b0 = np.clip(b0, ref_bounds[3][0], ref_bounds[3][1])
-    P0 = np.clip(P0, ref_bounds[4][0], ref_bounds[4][1])
-
-    best_loglike = -np.inf
-    xbest_all = None
-    best_bounds_list = None
-    best_period_guess = None
-    best_C = None
-
-    # One start per period guess: the planet A/B start at their generalised
-    # least-squares values given the starting GP and cycle mean (the fit itself
-    # runs on rescaled parameters, see mfn.optimise_params_nonstat)
-    guesses = planet_guess if fit_planet else [None]
-
-    for i, p in enumerate(guesses):
-        period_bounds = (max(p - 10, args.search_period_min), min(p + 10, args.period_max)) if fit_planet else None
-        bounds_list = build_bounds_list_nonstat(args, stds, means, T, period_bounds, amp_bound, fit_planet=fit_planet)
-
-        C = cov.Cov(
-            t_full,
-            err=term.Error(yerr_full),
-            rv_jit=term.InstrumentJitter(series_index[0], args.rvjit_frac * stds[0]),
-            rhk_jit=term.InstrumentJitter(series_index[1], args.rhkjit_frac * stds[1]),
-            rot=term.SimpleProductKernel(
-                nonstat=mfn.NonStationaryKernel(mfn.alpha_cyc, mfn.alpha_cyc_grad, mu=args.mu0, b=b0, P=P0, phi=phi0),
-                qp=MultiSeriesKernel(term.MEPKernel(args.sig, args.prot, args.rho, args.eta), series_index,
-                                     np.array([stds[0], stds[1]]),
-                                     np.array([stds[0], 0.0])),
-            ),
-        )
-        A0 = B0 = 0.0
-        if fit_planet and planet_AB is not None:
-            # --period-search gp: start from the scan's best-fit A/B at this period
-            A0, B0 = np.clip(planet_AB[i], -amp_bound, amp_bound)
-        elif fit_planet:
-            resid = y_full.copy()
-            resid[series_index[0]] -= rv_amp0 * mfn.shared_core(t_full[series_index[0]], b0, P0, phi0) + rv_offset0
-            resid[series_index[1]] -= rhk_amp0 * mfn.shared_core(t_full[series_index[1]], b0, P0, phi0) + rhk_offset0
-            A0, B0 = np.clip(mfn.gls_planet_amplitudes(C, t_full, resid, series_index, p, rv_std),
-                             -amp_bound, amp_bound)
-
-        xbest, C = mfn.optimise_params_nonstat(
-            t_full, y_full, series_index, C, bounds_list,
-            a0=rv_amp0, a1=rhk_amp0, d0=rv_offset0, d1=rhk_offset0,
-            planet_p=(p if fit_planet else args.cycle_P0), planet_A=A0, planet_B=B0,
-            fit_planet=fit_planet, change_C=True,
-        )
-
-        loglike = -1 * mfn.negloglike_nonstat(xbest, t_full, y_full, series_index, C, rv_std,
-                                               inject_planet=fit_planet)[0]
-
-        if loglike > best_loglike:
-            best_loglike = loglike
-            xbest_all = xbest
-            best_bounds_list = bounds_list
-            best_period_guess = p
-            best_C = C
-
-    diagnostics = {
-        "at_bounds": at_bounds_params(xbest_all, best_bounds_list) if xbest_all is not None else [],
-        "best_period_guess": best_period_guess,
-        "cov": best_C,
-    }
-    return xbest_all, best_loglike, diagnostics
-
-
 def fit_nonstat2(t_full, y_full, yerr_full, series_index, stds, args, planet_guess, cycle_seed, amp_bound, rv_std,
                  fit_planet=True, planet_AB=None):
     rv_offset0, rv_amp0, rhk_offset0, rhk_amp0, b0, P0, phi0 = cycle_seed
     means = [np.mean(y_full[series_index[0]]), np.mean(y_full[series_index[1]])]
     T = np.max(t_full)
 
-    # Warm start, same as nonstationary_2/main_nonstat.py. The covariance
+    # Warm start, same as nonstat2/main_nonstat.py. The covariance
     # envelope is core(t)*core(t'), so orient the core to rise with activity (RHK)
     ref_bounds = build_bounds_list_nonstat2(args, stds, means, T, None, amp_bound, fit_planet=False)
     if rhk_amp0 < 0:
@@ -691,10 +571,6 @@ def residual(mode, x, C, prep, fit_planet):
         b, P, phi = x[8], x[9], x[10]
         n = 11
         core_rv, core_act = mf.shared_core(t_rv, b, P, phi), mf.shared_core(t_act, b, P, phi)
-    elif mode == "nonstat":
-        b, P, phi = C.get_param(["rot.nonstat_b", "rot.nonstat_P", "rot.nonstat_phi"])
-        n = len(mfn.get_opt_params_nonstat(C)[0])
-        core_rv, core_act = mfn.shared_core(t_rv, b, P, phi), mfn.shared_core(t_act, b, P, phi)
     elif mode == "nonstat2":
         b, P, phi, c = C.get_param(["rot.nonstat_b", "rot.nonstat_P", "rot.nonstat_phi", "rot.nonstat_c"])
         n = len(mfn2.get_opt_params_nonstat(C)[0])
@@ -840,11 +716,11 @@ def prepare_injection(args, period, k, seed, modes_needed, log_prefix=""):
     stds = [np.std(y_full[series_index[0]]), np.std(y_full[series_index[1]])]
     amp_bound = args.planet_amp_max if args.planet_amp_max is not None else 1.5 * args.k_max
 
-    # cyc/nonstat share the cycle-fit warm start; no_cycle never fits a cycle
+    # cyc/nonstat2 share the cycle-fit warm start; no_cycle never fits a cycle
     # at all (matches main.py --no-fit-cycle) and warm-starts its additive
     # offsets from the raw data means instead.
     cycle_params = None
-    if "cyc" in modes_needed or "nonstat" in modes_needed or "nonstat2" in modes_needed:
+    if "cyc" in modes_needed or "nonstat2" in modes_needed:
         try:
             _, _, cycle_params = mf.fit_cycle(
                 t_full, y_full, series_index,
@@ -876,8 +752,8 @@ def fit_fn_and_args(mode, prep, args, planet_guess=None):
         planet_guess = prep["planet_guess"]
     common = (prep["t_full"], prep["y_full"], prep["yerr_full"], prep["series_index"], prep["stds"], args,
               planet_guess)
-    if mode in ("cyc", "nonstat", "nonstat2"):
-        fit_fn = {"cyc": fit_cyc, "nonstat": fit_nonstat, "nonstat2": fit_nonstat2}[mode]
+    if mode in ("cyc", "nonstat2"):
+        fit_fn = {"cyc": fit_cyc, "nonstat2": fit_nonstat2}[mode]
         return fit_fn, common + (prep["cycle_params"], prep["amp_bound"], prep["rv_std"])
     if mode == "no_cycle":
         rv_offset0 = float(np.mean(prep["y_full"][prep["series_index"][0]]))
@@ -1038,9 +914,9 @@ def run_resumable_pool(csv_path, csv_fields, tasks, worker_fn, n_workers, force_
 
 def main_from_args(args, csv_fields=CSV_FIELDS, worker_fn=None):
     requested_models = set(m.strip() for m in args.models.split(","))
-    unknown = requested_models - {"cyc", "nonstat", "nonstat2", "no_cycle"}
+    unknown = requested_models - {"cyc", "nonstat2", "no_cycle"}
     if unknown:
-        raise SystemExit(f"--models: unknown model(s) {sorted(unknown)}; choose from cyc,nonstat,nonstat2,no_cycle")
+        raise SystemExit(f"--models: unknown model(s) {sorted(unknown)}; choose from cyc,nonstat2,no_cycle")
 
     out_dir = os.path.dirname(args.output_csv)
     if out_dir:

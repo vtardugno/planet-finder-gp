@@ -22,7 +22,7 @@ import injection_recovery_mgic as irm
 def build_parser():
     parser = irm.build_parser()
     parser.description = "Per-model Delta MGIC_rv threshold from the real, uninjected Sun."
-    parser.set_defaults(models="cyc,nonstat,nonstat2,no_cycle")
+    parser.set_defaults(models="cyc,nonstat2,no_cycle")
     parser.add_argument("--threshold-path", default="results/mgic_calibration/mgic_threshold.json")
     return parser
 

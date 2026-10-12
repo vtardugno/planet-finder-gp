@@ -17,7 +17,7 @@ import functions_nonstat as mfn
 
 # nonstationary_2's module has the same name as nonstationary's, so load it
 # explicitly from file under a distinct name
-_spec = importlib.util.spec_from_file_location("functions_nonstat_2", os.path.join(ROOT, "nonstationary_2", "functions_nonstat.py"))
+_spec = importlib.util.spec_from_file_location("functions_nonstat_2", os.path.join(ROOT, "..", "..", "planet_finder_model", "nonstat2", "functions_nonstat.py"))
 mfn2 = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(mfn2)
 

@@ -1,7 +1,7 @@
 """Plot the injection-recovery grid produced by injection_recovery.py.
 
 Reads the results CSV and draws period x semi-amplitude recovery-fraction
-heatmaps for the cyc and nonstat models. Points are binned into a coarser
+heatmaps for each model. Points are binned into a coarser
 log-spaced grid (rather than plotted at their exact, irregularly-spaced
 injected values) so results pooled from multiple runs/machines render as a
 clean heatmap, with each cell annotated with its recovered percentage and the
@@ -19,7 +19,7 @@ plt.rcParams["font.size"] = 16  # default is 10
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description="Plot the injection-recovery grid comparing cyc vs nonstat.")
+    parser = argparse.ArgumentParser(description="Plot the injection-recovery grid for each model.")
     parser.add_argument("--input-csv", default="inj_rec/injection_recovery.csv")
     parser.add_argument("--modes", type=str, default=None,
                          help="Comma-separated GP modes to plot, left to right in the order given "
@@ -42,7 +42,7 @@ def build_parser():
 
 def write_summary_table(df, output_path):
     rows = []
-    for mode in ("cyc", "nonstat", "nonstat2", "no_cycle"):
+    for mode in ("cyc", "nonstat2", "no_cycle"):
         if mode not in df["mode"].unique():
             continue
         sub = df[df["mode"] == mode]
@@ -136,8 +136,8 @@ def main():
     else:
         k_edges = bin_edges(df["k_inj_ms"].to_numpy(), args.n_k_bins)
 
-    mode_titles = {"cyc": "Multi-GP + f_c", "nonstat": "Nonstat-GP old", "nonstat2": "Nonstat-GP", "no_cycle": "Multi-GP"}
-    mode_order = args.modes.split(",") if args.modes else ("cyc", "nonstat", "nonstat2", "no_cycle")
+    mode_titles = {"cyc": "Multi-GP + f_c", "nonstat2": "Nonstat-GP", "no_cycle": "Multi-GP"}
+    mode_order = args.modes.split(",") if args.modes else ("cyc", "nonstat2", "no_cycle")
     present_modes = [m for m in mode_order if m in df["mode"].unique()]
 
     fig, axs = plt.subplots(1, len(present_modes), figsize=(7 * len(present_modes), 9), sharey=True)
