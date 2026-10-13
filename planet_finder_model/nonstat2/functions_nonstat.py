@@ -288,7 +288,7 @@ def fit_cycle(t_full, y_full, series_index, b0=0, P0=4000, phi0=0, print_results
 # RHK panel
         axs[1].plot(x, y_rhk, '.', color='k')
         axs[1].plot(x, rhk_fit, linewidth=3,color='g')
-        axs[1].set_ylabel(r"$\log R'_\text{HK}$", fontsize=16)
+        axs[1].set_ylabel(r"$M_\text{HK}$", fontsize=16)
         axs[1].set_xlabel("Time (days)", fontsize=16)
     
 
@@ -1053,7 +1053,7 @@ def plot_fit_nonstat_residuals(t_full, y_full, yerr_full, series_index, C, xbest
         if k == 0:
             ax.set_ylabel("RV (m/s)",fontsize=16)
         if k == 1:
-            ax.set_ylabel(r"$\log R'_\mathrm{HK}$", fontsize=16)
+            ax.set_ylabel(r"$M_\text{HK}$", fontsize=16)
 
         ax_res = axs[2*k+1]
         ax_res.errorbar(t_full[series_index[k]], res, res_err, fmt='.', color='k')
@@ -1072,6 +1072,7 @@ def plot_fit_nonstat_residuals(t_full, y_full, yerr_full, series_index, C, xbest
     axs[-1].set_xlabel('Time (days)', fontsize=16)
     axs[0].legend(fontsize=16)
     plt.savefig(output_name)
+    print("rv std" ,np.std(res_rv), "mhk std: ", np.std(res_rhk))
     if return_residuals==True:
         return tsmooth, mus, res_rv, res_rhk
     else:
