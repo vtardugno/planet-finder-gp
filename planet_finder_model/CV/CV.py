@@ -274,6 +274,35 @@ def test_loglike_nonstat2(xbest, t_full, y_full, series_index, C, T, fit_planet)
 
     return C.loglike(y_model)
 
+def build_C_qp(args, xbest, t_full, yerr_full, series_index):
+    # Same covariance as the no_cycle / cyc C_test, at the best-fit params
+    return cov.Cov(
+                t_full,
+                err=term.Error(yerr_full),
+                rv_jit=term.InstrumentJitter(series_index[0], xbest[0]),
+                rhk_jit=term.InstrumentJitter(series_index[1], xbest[1]),
+                rot = MultiSeriesKernel(term.MEPKernel(args.sig,xbest[2],xbest[3],xbest[4]), series_index,
+                        np.array([xbest[5], xbest[6]]),
+                        np.array([xbest[7], 0.0])
+                    ),
+                )
+
+def build_C_nonstat2(args, xbest, t_full, yerr_full, series_index, T):
+    # Same covariance as the nonstat2 C_test, at the best-fit params
+    return cov.Cov(
+                t_full,
+                err=term.Error(yerr_full),
+                rv_jit=term.InstrumentJitter(series_index[0], xbest[0]),
+                rhk_jit=term.InstrumentJitter(series_index[1], xbest[1]),
+                rot = term.SimpleProductKernel(
+                        nonstat=mfn2.make_nonstat_kernel(T, xbest[2], xbest[3], xbest[4], xbest[5]),
+                        qp=MultiSeriesKernel(term.MEPKernel(args.sig,xbest[6],xbest[7],xbest[8]), series_index,
+                                np.array([xbest[9], xbest[10]]),
+                                np.array([xbest[11], 0.0])
+                            ),
+                    ),
+                )
+
 def fit_nocyc(args, t_full, y_full, yerr_full, series_index, stds, planet_p, rv_std):
     bounds_list = build_bounds_list_nocyc(args, stds, planet_p)
     d0, d1 = np.mean(y_full[series_index[0]]), np.mean(y_full[series_index[1]])
@@ -402,6 +431,12 @@ def main():
     loglike_total_nocyc = 0
     loglike_total_cyc = 0
     loglike_total_nonstat2 = 0
+    # Conditional test loglike, log p(y_test | y_train, xbest), computed as
+    # log p(y_all | xbest) - log p(y_train | xbest) (chain rule; identical to
+    # conditioning the GP on the training data at the best fit)
+    cond_total_nocyc = 0
+    cond_total_cyc = 0
+    cond_total_nonstat2 = 0
     cv_rows = []
 
 
@@ -449,7 +484,12 @@ def main():
         test_loglike_nocyc = -1*mf.negloglike_nocyc(xbest, t_full_test, y_full_test, series_index_test, C_test, rv_std, inject_planet=args.fit_planet)[0]
         loglike_total_nocyc = loglike_total_nocyc + test_loglike_nocyc
         print(f"fold {fold:02d} [no_cycle]: test loglike={test_loglike_nocyc:.6f}")
-        cv_rows.append({"fold": fold, "mode": "no_cycle", "test_loglike": test_loglike_nocyc, "planet_p": planet_p_fold})
+        ll_all = -mf.negloglike_nocyc(xbest, t_full, y_full, series_index, build_C_qp(args, xbest, t_full, yerr_full, series_index), rv_std, inject_planet=args.fit_planet)[0]
+        ll_train = -mf.negloglike_nocyc(xbest, t_full_train, y_full_train, series_index_train, build_C_qp(args, xbest, t_full_train, yerr_full_train, series_index_train), rv_std, inject_planet=args.fit_planet)[0]
+        cond_loglike_nocyc = ll_all - ll_train
+        cond_total_nocyc = cond_total_nocyc + cond_loglike_nocyc
+        print(f"fold {fold:02d} [no_cycle]: conditional test loglike={cond_loglike_nocyc:.6f}")
+        cv_rows.append({"fold": fold, "mode": "no_cycle", "test_loglike": test_loglike_nocyc, "test_loglike_cond": cond_loglike_nocyc, "planet_p": planet_p_fold})
         fit_plot_name_optim = f"CV/optim_fit_plot_no_cycle_{fold}.png"
         mf.plot_fit(t_full_train, y_full_train, yerr_full_train, series_index_train, C, xbest, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
 
@@ -473,7 +513,12 @@ def main():
         test_loglike_cyc = -1*mf.negloglike_cyc(xbest, t_full_test, y_full_test, series_index_test, C_test, rv_std, inject_planet=args.fit_planet)[0]
         loglike_total_cyc = loglike_total_cyc + test_loglike_cyc
         print(f"fold {fold:02d} [cyc]: test loglike={test_loglike_cyc:.6f}")
-        cv_rows.append({"fold": fold, "mode": "cyc", "test_loglike": test_loglike_cyc, "planet_p": planet_p_fold})
+        ll_all = -mf.negloglike_cyc(xbest, t_full, y_full, series_index, build_C_qp(args, xbest, t_full, yerr_full, series_index), rv_std, inject_planet=args.fit_planet)[0]
+        ll_train = -mf.negloglike_cyc(xbest, t_full_train, y_full_train, series_index_train, build_C_qp(args, xbest, t_full_train, yerr_full_train, series_index_train), rv_std, inject_planet=args.fit_planet)[0]
+        cond_loglike_cyc = ll_all - ll_train
+        cond_total_cyc = cond_total_cyc + cond_loglike_cyc
+        print(f"fold {fold:02d} [cyc]: conditional test loglike={cond_loglike_cyc:.6f}")
+        cv_rows.append({"fold": fold, "mode": "cyc", "test_loglike": test_loglike_cyc, "test_loglike_cond": cond_loglike_cyc, "planet_p": planet_p_fold})
 
         fit_plot_name_optim = f"CV/optim_fit_plot_cyc_{fold}.png"
         mf.plot_fit_cyc(t_full_train, y_full_train, yerr_full_train, series_index_train, C, xbest, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
@@ -501,7 +546,12 @@ def main():
         test_loglike_ns2 = test_loglike_nonstat2(xbest, t_full_test, y_full_test, series_index_test, C_test, T_train, args.fit_planet)
         loglike_total_nonstat2 = loglike_total_nonstat2 + test_loglike_ns2
         print(f"fold {fold:02d} [nonstat2]: test loglike={test_loglike_ns2:.6f}")
-        cv_rows.append({"fold": fold, "mode": "nonstat2", "test_loglike": test_loglike_ns2, "planet_p": planet_p_fold})
+        ll_all = test_loglike_nonstat2(xbest, t_full, y_full, series_index, build_C_nonstat2(args, xbest, t_full, yerr_full, series_index, T_train), T_train, args.fit_planet)
+        ll_train = test_loglike_nonstat2(xbest, t_full_train, y_full_train, series_index_train, build_C_nonstat2(args, xbest, t_full_train, yerr_full_train, series_index_train, T_train), T_train, args.fit_planet)
+        cond_loglike_ns2 = ll_all - ll_train
+        cond_total_nonstat2 = cond_total_nonstat2 + cond_loglike_ns2
+        print(f"fold {fold:02d} [nonstat2]: conditional test loglike={cond_loglike_ns2:.6f}")
+        cv_rows.append({"fold": fold, "mode": "nonstat2", "test_loglike": test_loglike_ns2, "test_loglike_cond": cond_loglike_ns2, "planet_p": planet_p_fold})
 
         fit_plot_name_optim = f"CV/optim_fit_plot_nonstat2_{fold}.png"
         mfn2.plot_fit_nonstat(t_full_train, y_full_train, yerr_full_train, series_index_train, C, xbest, rv_std=rv_std,output_name=fit_plot_name_optim,inject_planet=args.fit_planet)
@@ -511,6 +561,9 @@ def main():
     print(f"Total log-likelihood [no_cycle]: {loglike_total_nocyc}")
     print(f"Total log-likelihood [cyc]: {loglike_total_cyc}")
     print(f"Total log-likelihood [nonstat2]: {loglike_total_nonstat2}")
+    print(f"Total conditional log-likelihood [no_cycle]: {cond_total_nocyc}")
+    print(f"Total conditional log-likelihood [cyc]: {cond_total_cyc}")
+    print(f"Total conditional log-likelihood [nonstat2]: {cond_total_nonstat2}")
 
     try:
         import pandas as pd
