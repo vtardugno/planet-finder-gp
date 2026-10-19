@@ -1033,17 +1033,22 @@ def plot_fit_nonstat_residuals(t_full, y_full, yerr_full, series_index, C, xbest
         res = y_model[series_index[k]] - mu_res
         res_err = yerr_full[series_index[k]]
 
+        # add the cycle mean back so the top panels show data and prediction including the cycle
+        a_k, d_k = (a0, d0) if k == 0 else (a1, d1)
+        y_plot = y_model[series_index[k]] + a_k*shared_core_pos(t_full[series_index[k]], b, P, phi, c, T) + d_k
+        mu = mu + a_k*shared_core_pos(tsmooth, b, P, phi, c, T) + d_k
+
         ax = axs[2*k]
         if k ==0 :
             mu=mu*1000
             var=var*1000**2
             res = res*1000
             res_err = res_err*1000
-            ax.errorbar(t_full[series_index[k]], y_model[series_index[k]]*1000, yerr_full[series_index[k]]*1000, fmt='.', color='k', label='meas.')
+            ax.errorbar(t_full[series_index[k]], y_plot*1000, yerr_full[series_index[k]]*1000, fmt='.', color='k', label='meas.')
             if inject_planet == True:
                 ax.plot(t_full[series_index[k]], planet_injection(t_full[series_index[k]], xbest[n+4], xbest[n+5], xbest[n+6])/rv_std * 1000, 'r', label='injected planet')
         if k == 1:
-            ax.errorbar(t_full[series_index[k]], y_model[series_index[k]], yerr_full[series_index[k]], fmt='.', color='k', label='meas.')
+            ax.errorbar(t_full[series_index[k]], y_plot, yerr_full[series_index[k]], fmt='.', color='k', label='meas.')
         ax.fill_between(tsmooth,
             mu - np.sqrt(var),
             mu + np.sqrt(var),
