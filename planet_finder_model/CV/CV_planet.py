@@ -51,6 +51,8 @@ def main():
 
     parser = build_parser()
     parser.set_defaults(output_csv="CV/cv_planet_results.csv")
+    # Shortest planet period searched / fitted, as in the injection-recovery runs
+    parser.add_argument("--search-period-min", type=float, default=50.0)
     args = parser.parse_args()
 
     # injection_recovery.py's defaults (period search range, number of guesses,
