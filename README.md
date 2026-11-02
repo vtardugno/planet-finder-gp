@@ -11,7 +11,7 @@ planet_finder_model/
   nonstat2/     nonstat2 model: functions_nonstat.py, main_nonstat.py (single fit)
   CV/           CV.py (12-fold CV), CV_block.py (contiguous-block CV), mgic.py (MGIC per model)
   inj_rec/      injection-recovery sweeps, MGIC calibration, pooling and plotting
-  data/         input data, one folder per star (Solar_Data/, HD4628/)
+  data/         input data, one folder per star (Solar_Data/)
   results/      saved fits and MGIC thresholds (results/mgic_calibration/)
 archive/        old models and experiments, kept for reference
 ```
@@ -21,6 +21,25 @@ archive/        old models and experiments, kept for reference
 - `cyc`: stationary multi-series GP + activity cycle (linear trend + sinusoid) in the mean.
 - `no_cycle`: the same GP with no cycle term (`cyc/main_cycle_likelihood.py --no-fit-cycle`).
 - `nonstat2`: the cycle scales both the mean and the GP variance.
+
+### nonstat2 design
+
+A latent GP G(t) with an S+LEAF MEP kernel (an approximation to the quasi-periodic kernel) is shared by
+both series, as in the Rajpaul et al. (2015) multi-GP. The cycle f_c(t) = b t + sin(2π t / P_cyc + φ)
+is turned into a non-negative envelope bounded by 1,
+
+    f̃_c(t) = max(0, f_c(t) + c) / (1 + c + |b| T),
+
+where T is the time baseline. The envelope multiplies both the GP terms and the mean:
+
+    RV(t)  = f̃_c(t) [α_RV G(t) + β_RV Ġ(t) + a_RV] + δ_RV
+    MHK(t) = f̃_c(t) [α_HK G(t) + a_HK] + δ_HK
+
+The covariance becomes k_NS(t_i, t_j) = f̃_c(t_i) k_MS(t_i, t_j) f̃_c(t_j), where k_MS is the stationary
+multi-GP kernel. This keeps the kernel semi-separable, so the likelihood still costs O(n) through S+LEAF's
+`NonStationaryKernel`. The offset c ≥ 0 sets how deep the modulation is: as c → ∞, f̃_c → 1 and the model
+reduces to a stationary GP with a constant mean, like `no_cycle`. The cycle parameters b, P_cyc and φ are shared by RV and MHK, and each series
+has its own a and δ. A least-squares fit of the cycle alone gives the starting values for the full fit.
 
 ## Requirements
 
